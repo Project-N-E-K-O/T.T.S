@@ -559,12 +559,14 @@ class ThrottledLogger:
             self._logger.info(self._format_message(msg), *args, **kwargs)
     
     def warning(self, key: str, msg: str, *args, **kwargs):
-        """速率限制的 warning 日志（始终记录）"""
-        self._logger.warning(msg, *args, **kwargs)
+        """速率限制的 warning 日志"""
+        if self._should_log(key):
+            self._logger.warning(self._format_message(msg), *args, **kwargs)
     
     def error(self, key: str, msg: str, *args, **kwargs):
-        """速率限制的 error 日志（始终记录）"""
-        self._logger.error(msg, *args, **kwargs)
+        """速率限制的 error 日志"""
+        if self._should_log(key):
+            self._logger.error(self._format_message(msg), *args, **kwargs)
     
     def reset(self, key: str = None):
         """重置计时器"""

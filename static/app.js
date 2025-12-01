@@ -2883,6 +2883,13 @@ function init_app(){
                         });
                         if (!r.ok) throw new Error('main_server rejected');
                         
+                        // 启用 analyzer（确保 agent 模式开启时 analyze API 可用）
+                        await fetch('/api/agent/admin/control', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({action: 'enable_analyzer'})
+                        });
+                        
                         // 【防竞态】API请求完成后确认总开关仍然开启
                         if (!agentMasterCheckbox.checked) {
                             console.log('[App] API请求完成后总开关已关闭，不启动轮询');
@@ -2917,12 +2924,12 @@ function init_app(){
                     // 重置子开关
                     resetSubCheckboxes();
                     
-                    // 停止所有任务并重置状态
+                    // 禁用 analyzer 并停止所有任务（disable_analyzer 会 cascade 调用 end_all）
                     try {
                         await fetch('/api/agent/admin/control', {
                             method: 'POST', 
                             headers: {'Content-Type': 'application/json'}, 
-                            body: JSON.stringify({action: 'end_all'})
+                            body: JSON.stringify({action: 'disable_analyzer'})
                         });
                         
                         await fetch('/api/agent/flags', {

@@ -125,7 +125,8 @@ class McpRouterClient:
                 return result.get("result")
                 
         except httpx.HTTPStatusError as e:
-            logger.error(f"[MCP] HTTP error {e.response.status_code}: {e.response.text}")
+            # 使用统一的速率限制日志记录器（HTTP错误可能频繁发生）
+            _throttled_logger.error(f"mcp_http_error_{method}", f"[MCP] HTTP error {e.response.status_code}: {e.response.text}")
             return None
         except Exception as e:
             # 使用统一的速率限制日志记录器

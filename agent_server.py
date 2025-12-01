@@ -583,6 +583,9 @@ async def set_agent_flags(payload: Dict[str, Any]):
 # 3) 分析器模块：接收 cross-server 的对话片段，识别潜在任务，转发到规划器
 @app.post("/analyze_and_plan")
 async def analyze_and_plan(payload: Dict[str, Any]):
+    # 检查 analyzer 是否已启用（由 agent 总开关控制）
+    if not Modules.analyzer_enabled:
+        return {"success": False, "status": "analyzer_disabled", "message": "Analyzer is disabled"}
     if not Modules.analyzer or not Modules.planner:
         raise HTTPException(503, "Analyzer/Planner not ready")
     messages = (payload or {}).get("messages", [])
