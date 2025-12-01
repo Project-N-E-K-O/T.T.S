@@ -638,23 +638,14 @@ class LLMSessionManager:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(f"http://localhost:{self.memory_server_port}/new_dialog/{self.lanlan_name}")
                 initial_prompt += resp.text
-            
+
             logger.info(f"🤖 开始创建 LLM Session (input_mode={input_mode})")
-            
+
             # 根据input_mode创建不同的session
             if input_mode == 'text':
-                # 文本模式：使用 OmniOfflineClient with OpenAI-compatible API
-                self.session = OmniOfflineClient(
-                    base_url=self.openrouter_url,
-                    api_key=self.openrouter_api_key,
-                    model=self.text_model,
-                    vision_model=self.vision_model,
-                    on_text_delta=self.handle_text_data,
-                    on_input_transcript=self.handle_input_transcript,
-                    on_output_transcript=self.handle_output_transcript,
-                    on_connection_error=self.handle_connection_error,
-                    on_response_done=self.handle_response_complete
-                )
+                # 文本模式：Talking Avatar模式，不再初始化LLM session
+                logger.info("🎭 Talking Avatar模式：跳过LLM初始化")
+                return True
             else:
                 # 语音模式：使用 OmniRealtimeClient
                 self.session = OmniRealtimeClient(
@@ -708,37 +699,44 @@ class LLMSessionManager:
             if isinstance(tts_result, Exception):
                 logger.error(f"TTS 启动失败: {tts_result}")
             if isinstance(llm_result, Exception):
-                raise llm_result  # LLM Session 失败是致命的
-            
+                # 对于文本模式，LLM初始化失败不是致命的（因为我们不使用LLM）
+                if input_mode == 'text':
+                    logger.warning(f"文本模式LLM初始化失败，但继续执行: {llm_result}")
+                else:
+                    raise llm_result  # 语音模式的LLM Session 失败是致命的
+
             # 标记 session 激活
+            # 对于文本模式，即使没有LLM session也标记为激活（因为TTS等功能仍然工作）
+            async with self.lock:
+                self.is_active = True
+
+            self.session_start_time = datetime.now()
+
+            # 只有语音模式才启动消息处理任务
             if self.session:
-                async with self.lock:
-                    self.is_active = True
-                    
-                self.session_start_time = datetime.now()
-                
                 # 启动消息处理任务
                 self.message_handler_task = asyncio.create_task(self.session.handle_messages())
-                
+
                 # 🔥 预热逻辑：对于语音模式，立即触发一次 skipped response 来 prefill instructions
                 # 这样可以大幅减少首轮对话的延迟（让 API 提前处理并缓存 instructions 的 KV cache）
+                # 文本模式不需要预热，因为不使用LLM
                 if isinstance(self.session, OmniRealtimeClient):
                     try:
                         logger.info(f"🔥 开始预热 Session，prefill instructions...")
                         warmup_start = time.time()
-                        
+
                         # 创建一个事件来等待预热完成
                         warmup_done_event = asyncio.Event()
                         original_callback = self.session.on_response_done
-                        
+
                         # 临时替换回调，只用于等待预热完成
                         async def warmup_callback():
                             warmup_done_event.set()
-                        
+
                         self.session.on_response_done = warmup_callback
-                        
+
                         await self.session.create_response("", skipped=True)
-                        
+
                         # 等待预热完成（最多5秒）
                         try:
                             await asyncio.wait_for(warmup_done_event.wait(), timeout=5.0)
@@ -746,28 +744,26 @@ class LLMSessionManager:
                             logger.info(f"✅ Session预热完成 (耗时: {warmup_time:.2f}秒)，首轮对话延迟已优化")
                         except asyncio.TimeoutError:
                             logger.warning(f"⚠️ Session预热超时（5秒），继续执行...")
-                        
+
                         # 恢复原始回调
                         self.session.on_response_done = original_callback
-                        
+
                     except Exception as e:
                         logger.warning(f"⚠️ Session预热失败（不影响正常使用）: {e}")
-                
-                # 启动成功，重置失败计数器
-                self.session_start_failure_count = 0
-                self.session_start_last_failure_time = None
-                
-                # 通知前端 session 已成功启动
-                await self.send_session_started(input_mode)
-                
-                # 标记session为就绪状态并处理可能已缓存的输入数据
-                async with self.input_cache_lock:
-                    self.session_ready = True
-                
-                # 处理在session启动期间可能已经缓存的输入数据
-                await self._flush_pending_input_data()
-            else:
-                raise Exception("Session not initialized")
+
+            # 启动成功，重置失败计数器
+            self.session_start_failure_count = 0
+            self.session_start_last_failure_time = None
+
+            # 通知前端 session 已成功启动
+            await self.send_session_started(input_mode)
+
+            # 标记session为就绪状态并处理可能已缓存的输入数据
+            async with self.input_cache_lock:
+                self.session_ready = True
+
+            # 处理在session启动期间可能已经缓存的输入数据
+            await self._flush_pending_input_data()
         
         except Exception as e:
             # 记录失败
@@ -1097,41 +1093,36 @@ class LLMSessionManager:
             # 根据输入类型确定模式
             mode = 'text' if input_type == 'text' else 'audio'
             await self.start_session(self.websocket, new=False, input_mode=mode)
-            
+
             # 检查启动是否成功
-            if not self.session or not self.is_active:
+            # 对于文本模式，session为None但is_active为True是正常的
+            if not self.is_active or (mode != 'text' and not self.session):
                 logger.warning(f"⚠️ Session启动失败，放弃本次数据流")
                 return
         
         try:
             if input_type == 'text':
-                # 文本模式：检查 session 类型是否正确
-                if not isinstance(self.session, OmniOfflineClient):
-                    # 检查是否允许重建session
-                    if self.session_start_failure_count >= self.session_start_max_failures:
-                        logger.error("💥 Session类型不匹配，但失败次数过多，已停止自动重建")
-                        return
-                    
-                    logger.info(f"文本模式需要 OmniOfflineClient，但当前是 {type(self.session).__name__}. 自动重建 session。")
-                    # 先关闭旧 session
-                    if self.session:
-                        await self.end_session()
-                    # 再创建新的文本模式 session
-                    await self.start_session(self.websocket, new=False, input_mode='text')
-                    
-                    # 检查重建是否成功
-                    if not self.session or not self.is_active or not isinstance(self.session, OmniOfflineClient):
-                        logger.error("💥 文本模式Session重建失败，放弃本次数据流")
-                        return
-                
-                # 文本模式：直接发送文本
+                # 文本模式：Talking Avatar模式，直接复读用户输入作为模型输出，不调用LLM
                 if isinstance(data, str):
                     # 为每次文本输入生成新的speech_id（用于TTS和lipsync）
                     async with self.lock:
                         self.current_speech_id = str(uuid4())
 
                     await self.send_user_activity()
-                    await self.session.stream_text(data)
+
+                    # 模拟LLM输出流程：直接复读用户输入
+                    user_text = data.strip()
+
+                    # 1. 处理新消息：清空TTS队列
+                    await self.handle_new_message()
+
+                    # 2. 发送文本数据（复读用户输入）
+                    await self.handle_text_data(user_text, is_first_chunk=True)
+
+                    # 3. 完成响应
+                    await self.handle_response_complete()
+
+                    logger.info(f"📝 Talking Avatar模式：复读用户输入 - {user_text}")
                 else:
                     logger.error(f"💥 Stream: Invalid text data type: {type(data)}")
                 return
@@ -1195,20 +1186,18 @@ class LLMSessionManager:
                         resized_bytes = buffer.read()
                         resized_b64 = base64.b64encode(resized_bytes).decode('utf-8')
                         
-                        # 如果是文本模式（OmniOfflineClient），只存储图片，不立即发送
-                        if isinstance(self.session, OmniOfflineClient):
-                            # 只添加到待发送队列，等待与文本一起发送
-                            await self.session.stream_image(resized_b64)
-                        
                         # 如果是语音模式（OmniRealtimeClient），检查是否支持视觉并直接发送
-                        elif isinstance(self.session, OmniRealtimeClient):
+                        if isinstance(self.session, OmniRealtimeClient):
                             # 检查WebSocket连接
                             if not hasattr(self.session, 'ws') or not self.session.ws:
                                 logger.error("💥 Stream: Session websocket not available")
                                 return
-                            
+
                             # 语音模式直接发送图片
                             await self.session.stream_image(resized_b64)
+                        else:
+                            # 文本模式（Talking Avatar）或不支持视觉的模式，跳过图片处理
+                            logger.debug("🎭 Talking Avatar模式：跳过图片处理")
                     else:
                         logger.error(f"💥 Stream: Invalid screen data format.")
                         return

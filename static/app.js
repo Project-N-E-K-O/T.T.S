@@ -214,7 +214,10 @@ function init_app(){
                 if (response.type === 'gemini_response') {
                     // 检查是否是新消息的开始
                     const isNewMessage = response.isNewMessage || false;
-                    appendMessage(response.text, 'gemini', isNewMessage);
+                    // 在文本模式下不显示AI输出（因为是复读用户输入）
+                    if (!isTextSessionActive) {
+                        appendMessage(response.text, 'gemini', isNewMessage);
+                    }
                 } else if (response.type === 'user_transcript') {
                     // 处理用户语音转录，显示在聊天界面
                     appendMessage(response.text, 'user', true);
@@ -338,10 +341,23 @@ function init_app(){
                 } else if (response.type === 'system' && response.data === 'turn end') {
                     console.log('收到turn end事件，开始情感分析');
                     // 消息完成时进行情感分析
+                    let textForAnalysis = null;
+
                     if (currentGeminiMessage) {
-                        const fullText = currentGeminiMessage.textContent.replace(/^\[\d{2}:\d{2}:\d{2}\] 🎀 /, '');
+                        // 语音模式：使用AI回复进行情感分析
+                        textForAnalysis = currentGeminiMessage.textContent.replace(/^\[\d{2}:\d{2}:\d{2}\] 🎀 /, '');
+                    } else if (isTextSessionActive) {
+                        // 文本模式：使用用户最后输入进行情感分析
+                        const messages = document.querySelectorAll('#chatContainer .message.user');
+                        if (messages.length > 0) {
+                            const lastUserMessage = messages[messages.length - 1];
+                            textForAnalysis = lastUserMessage.textContent.replace(/^\[\d{2}:\d{2}:\d{2}\] 👤 /, '');
+                        }
+                    }
+
+                    if (textForAnalysis) {
                         setTimeout(async () => {
-                            const emotionResult = await analyzeEmotion(fullText);
+                            const emotionResult = await analyzeEmotion(textForAnalysis);
                             if (emotionResult && emotionResult.emotion) {
                                 console.log('消息完成，情感分析结果:', emotionResult);
                                 applyEmotion(emotionResult.emotion);
