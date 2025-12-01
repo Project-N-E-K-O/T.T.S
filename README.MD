@@ -3,33 +3,22 @@
 ![Logo](assets/neko_logo.jpg)
 
 [English](docs/README_en.md) | [日本語](docs/README_ja.md)
-# Project N.E.K.O. :kissing_cat: <br>**一个“活”的AI伙伴元宇宙，由你我共同构建。**
+# Project N.E.K.O. - Talking Twin Simulator (T.T.S.)
 
-> **N.E.K.O.** = **N**etworked **E**mpathetic **K**nowledging **O**rganism (网络型情感知性生命体)
->
-> N.E.K.O，一个渴望理解、建立连接、并与我们共同成长的数字生命。
+> T.T.S.，用虚拟形象为你讲述。
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Commit](https://img.shields.io/github/last-commit/wehos/N.E.K.O?color=green)]()
-[![百度云](https://custom-icon-badges.demolab.com/badge/百度云-Link-4169E1?style=flat&logo=baidunetdisk)](https://pan.baidu.com/s/1qb9XVV94c2FwhIeQO2De5A?pwd=kuro)
 [![QQ群](https://custom-icon-badges.demolab.com/badge/QQ群-1048307485-00BFFF?style=flat&logo=tencent-qq)](https://qm.qq.com/q/mxDoz0TnGg)
-[![Steam](https://img.shields.io/badge/Steam-%23000000.svg?logo=steam&logoColor=white)](https://store.steampowered.com/app/4099310/__NEKO/)
 
+为视频制作者设计的虚拟形象口播软件
 
-**:older_woman: 零配置开箱即用，我奶奶都能玩转的赛博猫娘！**
-
-:newspaper: **[![Steam](https://img.shields.io/badge/Steam-%23000000.svg?logo=steam&logoColor=white)](https://store.steampowered.com/app/4099310/__NEKO/)已上架！UI完全改版、并添加开箱即用的专属免费模型（感谢阶跃星辰赞助）。快点加入愿望单吧~**
+**:older_woman: 零配置开箱即用，我奶奶都能玩转的赛博猫娘！感谢阶跃星辰赞助~**
 
 *Project N.E.K.O.，喵宇宙！*
 
 </div>
-
-<div align="center">
-
-#### 功能演示（完整版见B站） [![Bilibili](https://img.shields.io/badge/Bilibili-%E6%95%99%E7%A8%8B%E8%A7%86%E9%A2%91-blue)](https://www.bilibili.com/video/BV1mM32zXE46/)
-
-https://github.com/user-attachments/assets/9d9e01af-e2cc-46aa-add7-8eb1803f061c
 
 </div>
 
@@ -37,7 +26,7 @@ https://github.com/user-attachments/assets/9d9e01af-e2cc-46aa-add7-8eb1803f061c
 
 # 猫娘计划 (Project N.E.K.O.)
 
-`N.E.K.O.` 是一个以开源为驱动、以公益为导向的UGC（用户生成内容）平台。我们的旅程始于Github和Steam，并将逐步拓展到移动App商店，最终目标是构建一个与现实世界紧密相连的AI原生元宇宙。
+本项目（T.T.S.）猫娘计划衍生项目。`N.E.K.O.` 是一个以开源为驱动、以公益为导向的UGC（用户生成内容）平台。我们的旅程始于Github和Steam，并将逐步拓展到移动App商店，最终目标是构建一个与现实世界紧密相连的AI原生元宇宙。
 
 ---
 
@@ -83,7 +72,9 @@ QQ群：1022939659
 
 ## 快速开始
 
-对于*一键包用户*，直接运行`N.E.K.O.exe`即可启动。
+(1) 执行`uv sync`安装依赖（或在`python3.11`环境中执行`pip install -r requirements.txt`）。
+
+(1) 执行 `python main_server.py` 并访问 `http://localhost:48911`。
 
 ## 进阶使用
 
@@ -134,7 +125,6 @@ Lanlan/
 ├── 📁 static/                   # 🌐 前端静态资源
 ├── 📁 templates/                # 📄 前端HTML模板
 ├── 📁 utils/                    # 🛠️ 工具模块
-├── 📁 launcher/                 # 🚀 Rust启动器
 ├── main_server.py               # 🌐 主服务器
 ├── agent_server.py              # 🤖 AI智能体服务器
 └── memory_server.py             # 🧠 记忆服务器
@@ -148,27 +138,4 @@ Lanlan/
 
 本项目环境依赖非常简单，请在`python3.11`环境中执行`pip install -r requirements.txt`或`uv sync`即可。开发者建议加入企鹅群1022939659，猫娘名称见项目标题。
 
-开发者详细启动步骤如下：(1)新建`pyhon3.11`环境。(2)执行`pip install -r requirements.txt`或`uv sync`安装依赖。(3)执行`python memory_server.py`, `python main_server.py`(可选`python agent_server.py`)。(4)通过main server中指定的端口（默认为`http://localhost:48911`）访问网页版并配置API Key。
-
-
-### TODO List（开发计划）
-
-- 多语言支持
-
-- 完善memory server中已有的语义索引的部分；开放已有的settings update功能。
-
-- 完善已有的主动对话功能。
-
-- 用React对前端进行重构，筹备手机端独立运行版本。
-
-- 引入MMD支持3D模型。
-
-- 猫娘网络，允许猫娘之间自行通信。
-
-- 接入QQ/cursor等外部软件。
-
-- 完善原生工具调用。
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=wehos/N.E.K.O.&type=Date)](https://www.star-history.com/#wehos/N.E.K.O.&Date)
+开发者详细启动步骤如下：(1)新建`pyhon3.11`环境。(2)执行`pip install -r requirements.txt`或`uv sync`安装依赖。(3)执行 `python main_server.py`(可选`python memory_server.py`,`python agent_server.py`)。(4)通过main server中指定的端口（默认为`http://localhost:48911`）访问网页版并配置API Key。

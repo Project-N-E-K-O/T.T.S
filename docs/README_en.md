@@ -3,34 +3,20 @@
 ![Logo](../assets/neko_logo.jpg)
 
 [中文](../README.MD) | [日本語](README_ja.md)
+# Project N.E.K.O. - Talking Twin Simulator (T.T.S.)
 
-# Project N.E.K.O. :kissing_cat: <br>**A Living AI Companion Metaverse, Built Together by You and Me.**
-
-> **N.E.K.O.** = **N**etworked **E**motional **K**nowledging **O**rganism
->
-> N.E.K.O., a digital life that yearns to understand, connect, and grow with us.
+> T.T.S., tell your story with virtual characters.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](../LICENSE)
 [![Commit](https://img.shields.io/github/last-commit/wehos/N.E.K.O?color=green)]()
-[![Baidu Cloud](https://custom-icon-badges.demolab.com/badge/百度云-Link-4169E1?style=flat&logo=baidunetdisk)](https://pan.baidu.com/s/1qb9XVV94c2FwhIeQO2De5A?pwd=kuro)
 [![QQ Group](https://custom-icon-badges.demolab.com/badge/QQ群-1048307485-00BFFF?style=flat&logo=tencent-qq)](https://qm.qq.com/q/mxDoz0TnGg)
-[![Steam](https://img.shields.io/badge/Steam-%23000000.svg?logo=steam&logoColor=white)](https://store.steampowered.com/app/4099310/__NEKO/)
 
+Virtual character narration software designed for video creators.
 
-**:older_woman: Zero-configuration, ready-to-use cyber catgirl that even my grandma can master!**
-
-:newspaper: **[![Steam](https://img.shields.io/badge/Steam-%23000000.svg?logo=steam&logoColor=white)](https://store.steampowered.com/app/4099310/__NEKO/) version has been released! Complete UI overhaul and added out-of-the-box exclusive free model (thanks to StepFun for sponsoring this project). Add it to your wishlist now~**
+**:older_woman: Zero-configuration, ready-to-use cyber catgirl that even my grandma can master! Thanks to StepFun for sponsoring~**
 
 *Project N.E.K.O., NekoVerse!*
-
-</div>
-
-<div align="center">
-
-#### Feature Demo (Full version on Bilibili) [![Bilibili](https://img.shields.io/badge/Bilibili-Tutorial-blue)](https://www.bilibili.com/video/BV1mM32zXE46/)
-
-https://github.com/user-attachments/assets/9d9e01af-e2cc-46aa-add7-8eb1803f061c
 
 </div>
 
@@ -84,21 +70,19 @@ QQ Group: 1022939659
 
 # Quick Start
 
-1. For *one-click package users*, simply run `新版启动器.exe` (New Launcher) to open the main control panel.
+(1) Run `uv sync` to install dependencies (or `pip install -r requirements.txt` in a `python3.11` environment).
 
-1. Click `启动对话服务器` (Start Dialogue Server) and `开始聊天` (Start Chat).
-
-**Multi-language support is planned in 2026 Spring.**
+(1) Run `python main_server.py` and visit `http://localhost:48911`.
 
 # Advanced Usage
 
 #### Configuring API Key
 
-When you want to obtain additional features by configuring your own API, you can configure a third-party AI service. This project currently recommends using *StepFun* or *Alibaba Cloud*. Visit `http://localhost:48911/api_key` to configure directly through the Web interface. **We will adapt to more international service provider in 2026 Spring.**
+When you want to obtain additional features by configuring your own API, you can configure a third-party AI service (core **must support Realtime API**). This project currently recommends using *StepFun* or *Alibaba Cloud*. Visit `http://localhost:48911/api_key` to configure directly through the Web interface.
 
 > Obtaining *Alibaba Cloud API*: Register an account on Alibaba Cloud's Bailian platform [official website](https://bailian.console.aliyun.com/). New users can receive substantial free credits after real-name verification. After registration, visit the [console](https://bailian.console.aliyun.com/api-key?tab=model#/api-key) to get your API Key.
 
-> *For **developers**: After cloning this project, (1) create a new `python3.11` environment. (2) Run `pip install -r requirements.txt` to install dependencies. (3) Run `python memory_server.py` and `python main_server.py`. (4) Access the web version through the port specified in main server (defaults to `http://localhost:48911`) and configure the API Key.*
+> *For **developers**, after cloning this project, (1) create a new `python3.11` environment. (2) Run `uv sync` to install dependencies. (3) Run `python memory_server.py` and `python main_server.py`. (4) Access the web version through the port specified in main server (defaults to `http://localhost:48911`) and configure the API Key.*
 
 #### Modifying Character Persona
 
@@ -122,7 +106,7 @@ When you want to obtain additional features by configuring your own API, you can
 
 ```
 Lanlan/
-├── 📁 brain/                    # 🧠 Background Agent modules for controlling keyboard/mouse and MCP based on frontend dialogue
+├── 📁 brain/                    # 🧠 Background Agent modules, control keyboard/mouse and MCP based on frontend dialogue
 ├── 📁 config/                   # ⚙️ Configuration management
 │   ├── api_providers.json       # API provider configuration
 │   ├── core_config.json         # Core configuration (API Keys, etc.)
@@ -131,15 +115,14 @@ Lanlan/
 ├── 📁 main_helper/              # 🔧 Core modules
 │   ├── core.py                  # Core dialogue module
 │   ├── cross_server.py         # Cross-server communication
-│   ├── omni_realtime_client.py  # Realtime API client
-│   ├── omni_offline_client.py  # Text API client
+│   ├── omni_realtime_client.py  # Realtime API client (Realtime API)
+│   ├── omni_offline_client.py   # Text API client (Response API)
 │   └── tts_helper.py            # 🔊 TTS engine adapter
 ├── 📁 memory/                   # 🧠 Memory management system
 │   ├── store/                   # Memory data storage
 ├── 📁 static/                   # 🌐 Frontend static resources
 ├── 📁 templates/                # 📄 Frontend HTML templates
 ├── 📁 utils/                    # 🛠️ Utility modules
-├── 📁 launcher/                 # 🚀 Rust launcher
 ├── main_server.py               # 🌐 Main server
 ├── agent_server.py              # 🤖 AI agent server
 └── memory_server.py             # 🧠 Memory server
@@ -155,21 +138,3 @@ This project has very simple environment dependencies. Just run `pip install -r 
 
 Detailed startup steps for developers: (1) Create a new `python3.11` environment. (2) Run `pip install -r requirements.txt` or `uv sync` to install dependencies. (3) Run `python memory_server.py`, `python main_server.py` (optional `python agent_server.py`). (4) Access the web version through the port specified in main server (defaults to `http://localhost:48911`) and configure the API Key.
 
-
-### TODO List (Development Plan)
-
-- Multi-language support.
-
-- Improve the semantic indexing part in memory server; open the existing settings update functionality.
-
-- Improve the existing proactive dialogue functionality.
-
-- Refactor frontend with React and prepare standalone mobile version.
-
-- Introduce MMD support for 3D models.
-
-- N.E.K.O. Network, allowing N.E.K.O.s to communicate autonomously.
-
-- Integrate with external software like Discord/Cursor.
-
-- Improve native tool calling.
