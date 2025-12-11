@@ -67,6 +67,9 @@ class Live2DManager {
         // 记录最后一次加载模型的原始路径（用于保存偏好时使用）
         this._lastLoadedModelPath = null;
 
+        // 热键绑定句柄
+        this._hotkeyHandler = null;
+
         // ⚠️ 已禁用自动保存功能：
         // 不再在窗口关闭/刷新时自动保存模型位置
         // 只有在模型设置页面手动点击"保存设置"按钮时才会保存位置和缩放

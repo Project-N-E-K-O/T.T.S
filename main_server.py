@@ -4768,7 +4768,9 @@ async def update_emotion_mapping(model_name: str, request: Request):
         file_refs['Expressions'] = preserved_expressions + new_expressions
 
         # 同时保留一份 EmotionMapping（供管理器读取与向后兼容）
+        # hotkeys 不写入 FileReferences，只存放在 EmotionMapping 中
         config_data['EmotionMapping'] = data
+        config_data['EmotionMapping']['hotkeys'] = data.get('hotkeys', {})
 
         # 保存配置到文件
         with open(model_json_path, 'w', encoding='utf-8') as f:
