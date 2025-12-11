@@ -585,9 +585,14 @@
                      }
 
                     if (emotionMappingData.success) {
-                        emotionMappingConfig[currentModel] = emotionMappingData.config || { motions: {}, expressions: {} };
+                        const cfg = emotionMappingData.config || {};
+                        emotionMappingConfig[currentModel] = {
+                            motions: cfg.motions || {},
+                            expressions: cfg.expressions || {},
+                            hotkeys: cfg.hotkeys || {}
+                        };
                     } else {
-                        emotionMappingConfig[currentModel] = { motions: {}, expressions: {} };
+                        emotionMappingConfig[currentModel] = { motions: {}, expressions: {}, hotkeys: {} };
                         showStatus(window.t ? window.t('emotion.loadEmotionFailed', {error: emotionMappingData.error}) : '加载情绪映射配置失败: ' + emotionMappingData.error, 'error');
                     }
                      
@@ -646,7 +651,8 @@
             if (!emotionMappingConfig[modelName]) {
                 emotionMappingConfig[modelName] = {
                     motions: {},
-                    expressions: {}
+                    expressions: {},
+                    hotkeys: {}
                 };
                 showStatus(window.t ? window.t('emotion.autoCreatedMapping', {model: modelName}) : `已为模型 ${modelName} 自动创建情绪映射配置`, 'success');
             }
@@ -659,9 +665,10 @@
             card.id = `emotion-${emotion}`;
 
             // 从情绪映射配置中获取文件列表
-            const modelMapping = emotionMappingConfig[currentModel] || { motions: {}, expressions: {} };
+            const modelMapping = emotionMappingConfig[currentModel] || { motions: {}, expressions: {}, hotkeys: {} };
             const motions = modelMapping.motions[emotion] || [];
             const expressions = modelMapping.expressions[emotion] || [];
+            const hotkey = (modelMapping.hotkeys && modelMapping.hotkeys[emotion]) || '';
 
             // 获取可用的文件列表
             const availableMotions = currentModelFiles.motion_files || [];
@@ -676,6 +683,14 @@
                     <span class="emotion-icon ${emotion}">${emotionName.charAt(0)}</span>
                     ${emotionName}
                 </h3>
+
+                <div class="file-list">
+                    <h4>${window.t ? window.t('emotion.hotkey') : '快捷键'}</h4>
+                    <div class="file-input-group">
+                        <input id="hotkey-${emotion}" class="file-select" maxlength="1" value="${hotkey}" placeholder="${window.t ? window.t('emotion.hotkeyPlaceholder') : '输入单个按键'}" />
+                        <button class="btn btn-small btn-primary" type="button" onclick="setEmotionHotkey('${emotion}')">${window.t ? window.t('emotion.saveHotkey') : '保存快捷键'}</button>
+                    </div>
+                </div>
                 
                 <div class="file-list">
                     <h4>${window.t ? window.t('emotion.motionFiles', {count: motions.length}) : `动作文件 (${motions.length})`}</h4>
@@ -725,6 +740,30 @@
             `;
         }
 
+        // 设置情绪快捷键
+        function setEmotionHotkey(emotion) {
+            if (!emotionMappingConfig[currentModel]) {
+                emotionMappingConfig[currentModel] = { motions: {}, expressions: {}, hotkeys: {} };
+            }
+            if (!emotionMappingConfig[currentModel].hotkeys) {
+                emotionMappingConfig[currentModel].hotkeys = {};
+            }
+            const input = document.getElementById(`hotkey-${emotion}`);
+            if (!input) return;
+            const key = (input.value || '').trim().toLowerCase();
+            if (key.length > 1) {
+                showStatus(window.t ? window.t('emotion.hotkeyLengthLimit') : '快捷键请只输入单个字符', 'error');
+                return;
+            }
+            emotionMappingConfig[currentModel].hotkeys[emotion] = key;
+            showStatus(
+                key 
+                    ? (window.t ? window.t('emotion.hotkeySaved', {emotion, key}) : `已为 ${emotion} 绑定快捷键: ${key}`)
+                    : (window.t ? window.t('emotion.hotkeyCleared', {emotion}) : `已清除 ${emotion} 的快捷键`),
+                'success'
+            );
+        }
+
         // 从下拉框添加文件
         function addFileFromSelect(emotion, type) {
             const select = document.getElementById(`${type}-select-${emotion}`);
@@ -737,7 +776,7 @@
 
             // 确保当前模型在情绪映射配置中存在
             if (!emotionMappingConfig[currentModel]) {
-                emotionMappingConfig[currentModel] = { motions: {}, expressions: {} };
+                emotionMappingConfig[currentModel] = { motions: {}, expressions: {}, hotkeys: {} };
             }
 
             if (type === 'motions') {
@@ -826,10 +865,11 @@
             const confirmTitle = window.t ? window.t('emotion.resetConfig') : '重置配置';
             if (await showConfirm(confirmMsg, confirmTitle, {danger: true})) {
                 if (!emotionMappingConfig[currentModel]) {
-                    emotionMappingConfig[currentModel] = { motions: {}, expressions: {} };
+                    emotionMappingConfig[currentModel] = { motions: {}, expressions: {}, hotkeys: {} };
                 }
                 emotionMappingConfig[currentModel].motions = { "Idle": [] };
                 emotionMappingConfig[currentModel].expressions = {};
+                emotionMappingConfig[currentModel].hotkeys = {};
                 renderEmotionGrid();
                 showStatus(window.t ? window.t('emotion.configReset') : '配置已重置', 'success');
             }

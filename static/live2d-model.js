@@ -8,6 +8,9 @@ Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
         throw new Error('PIXI 应用未初始化，请先调用 initPIXI()');
     }
 
+    // 卸载旧模型的快捷键监听
+    this.removeEmotionHotkeys();
+
     // 移除当前模型
     if (this.currentModel) {
         // 先清空常驻表情记录和初始参数
@@ -182,6 +185,7 @@ Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
                 } else {
                     this.emotionMapping = this.deriveEmotionMappingFromFileRefs(this.fileReferences || {});
                 }
+                if (!this.emotionMapping.hotkeys) this.emotionMapping.hotkeys = {};
                 console.log('已加载情绪映射:', this.emotionMapping);
             } else {
                 console.warn('模型配置中未找到 settings.json，无法加载情绪映射');
@@ -195,6 +199,9 @@ Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
 
         // 记录模型的初始参数（用于expression重置）
         this.recordInitialParameters();
+
+        // 安装情绪快捷键
+        this.installEmotionHotkeys();
 
         // 调用回调函数
         if (this.onModelLoaded) {
@@ -297,6 +304,7 @@ Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
                         } else {
                             this.emotionMapping = this.deriveEmotionMappingFromFileRefs(this.fileReferences || {});
                         }
+                        if (!this.emotionMapping.hotkeys) this.emotionMapping.hotkeys = {};
                         console.log('回退模型已加载情绪映射:', this.emotionMapping);
                     } else {
                         console.warn('回退模型配置中未找到 settings.json，无法加载情绪映射');
