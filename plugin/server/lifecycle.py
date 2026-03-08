@@ -354,6 +354,18 @@ class ServerLifecycleService:
             had_errors = True
             logger.warning("failed to cleanup plugin communication resources: {}", exc)
 
+        # Phase 4: clear registry so next startup() / manual start_plugin() is clean
+        try:
+            with state.acquire_plugin_hosts_write_lock():
+                state.plugin_hosts.clear()
+            with state.acquire_plugins_write_lock():
+                state.plugins.clear()
+            with state.acquire_event_handlers_write_lock():
+                state.event_handlers.clear()
+        except Exception as exc:
+            had_errors = True
+            logger.warning("failed to clear plugin registry during shutdown: {}", exc)
+
         try:
             emit_lifecycle_event({"type": "server_shutdown_complete", "plugin_id": "server", "time": now_iso()})
         except Exception as exc:

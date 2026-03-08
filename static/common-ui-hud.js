@@ -148,8 +148,8 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
             sidePanel._popupElement = popup;
 
             const configBtn = document.createElement('div');
-            const LABEL_KEY = 'settings.toggles.pluginConfigPage';
-            const LABEL_FALLBACK = '配置页';
+            const LABEL_KEY = 'settings.toggles.pluginManagementPanel';
+            const LABEL_FALLBACK = '管理面板';
             Object.assign(configBtn.style, {
                 display: 'flex',
                 alignItems: 'center',
@@ -205,6 +205,7 @@ window.AgentHUD._createAgentPopupContent = function (popup) {
             });
 
             sidePanel.appendChild(configBtn);
+            document.body.appendChild(sidePanel);
             this._attachSidePanelHover(toggleItem, sidePanel);
         }
     });

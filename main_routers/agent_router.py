@@ -154,7 +154,7 @@ async def post_agent_command(request: Request):
 
         t_proxy = time.perf_counter()
         client = _get_http_client()
-        r = await client.post(f"{TOOL_SERVER_BASE}/agent/command", json=data, timeout=1.5)
+        r = await client.post(f"{TOOL_SERVER_BASE}/agent/command", json=data, timeout=8.0)
         proxy_ms = round((time.perf_counter() - t_proxy) * 1000, 2)
         if not r.is_success:
             # Rollback local state on upstream failure.

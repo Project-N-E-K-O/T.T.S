@@ -1771,49 +1771,68 @@ async def set_agent_flags(payload: Dict[str, Any]):
             Modules.agent_flags["browser_use_enabled"] = False
             
     if isinstance(uf, bool):
-        if uf:  # Attempting to enable UserPlugin
-            started = await _ensure_plugin_lifecycle_started()
-            if not started:
-                _set_capability("user_plugin", True, "")
-                Modules.agent_flags["user_plugin_enabled"] = False
-                Modules.notification = json.dumps({"code": "AGENT_PLUGIN_SERVER_ERROR"})
-                logger.warning("[Agent] Cannot enable UserPlugin: lifecycle startup failed")
-                _bump_state_revision()
-                await _emit_agent_status_update(lanlan_name=lanlan_name)
-                return {"success": True, "agent_flags": Modules.agent_flags}
-
-            # Plugins need a moment to spawn their processes after lifecycle startup
-            for _attempt in range(8):
-                await asyncio.sleep(0.5)
-                try:
-                    async with httpx.AsyncClient(timeout=1.0, proxy=None, trust_env=False) as client:
-                        r = await client.get(f"http://127.0.0.1:{USER_PLUGIN_SERVER_PORT}/plugins")
-                        if r.status_code == 200:
-                            data = r.json()
-                            plugins = data.get("plugins", []) if isinstance(data, dict) else []
-                            if plugins:
-                                break
-                except Exception:
-                    pass
-            else:
-                plugins = []
-
-            if not plugins:
-                _set_capability("user_plugin", True, "")
-                Modules.agent_flags["user_plugin_enabled"] = False
-                Modules.notification = json.dumps({"code": "AGENT_NO_PLUGINS_FOUND"})
-                logger.warning("[Agent] Cannot enable UserPlugin: no plugins found after lifecycle start")
-                await _ensure_plugin_lifecycle_stopped()
-                _bump_state_revision()
-                await _emit_agent_status_update(lanlan_name=lanlan_name)
-                return {"success": True, "agent_flags": Modules.agent_flags}
-
-            _set_capability("user_plugin", True, "")
+        if uf:  # Attempting to enable UserPlugin — non-blocking (like CUA)
             Modules.agent_flags["user_plugin_enabled"] = True
-        else:  # Disabling UserPlugin
+            Modules.notification = json.dumps({"code": "AGENT_UP_ENABLED_CHECKING"})
+
+            async def _bg_plugin_enable():
+                _ln = lanlan_name
+                try:
+                    started = await _ensure_plugin_lifecycle_started()
+                    if not started:
+                        Modules.agent_flags["user_plugin_enabled"] = False
+                        Modules.notification = json.dumps({"code": "AGENT_PLUGIN_SERVER_ERROR"})
+                        logger.warning("[Agent] Cannot enable UserPlugin: lifecycle startup failed")
+                        _bump_state_revision()
+                        await _emit_agent_status_update(lanlan_name=_ln)
+                        return
+
+                    plugins = []
+                    for _attempt in range(8):
+                        await asyncio.sleep(0.5)
+                        try:
+                            async with httpx.AsyncClient(timeout=1.0, proxy=None, trust_env=False) as client:
+                                r = await client.get(f"http://127.0.0.1:{USER_PLUGIN_SERVER_PORT}/plugins")
+                                if r.status_code == 200:
+                                    data = r.json()
+                                    plugins = data.get("plugins", []) if isinstance(data, dict) else []
+                                    if plugins:
+                                        break
+                        except Exception:
+                            pass
+
+                    if not plugins:
+                        Modules.agent_flags["user_plugin_enabled"] = False
+                        Modules.notification = json.dumps({"code": "AGENT_NO_PLUGINS_FOUND"})
+                        logger.warning("[Agent] Cannot enable UserPlugin: no plugins found after lifecycle start")
+                        await _ensure_plugin_lifecycle_stopped()
+                    else:
+                        _set_capability("user_plugin", True, "")
+                        logger.info("[Agent] UserPlugin lifecycle ready (%d plugins)", len(plugins))
+                except Exception as exc:
+                    Modules.agent_flags["user_plugin_enabled"] = False
+                    Modules.notification = json.dumps({"code": "AGENT_PLUGIN_SERVER_ERROR"})
+                    logger.error("[Agent] Background plugin enable failed: %s", exc)
+                finally:
+                    _bump_state_revision()
+                    await _emit_agent_status_update(lanlan_name=_ln)
+
+            _bg = asyncio.create_task(_bg_plugin_enable())
+            Modules._persistent_tasks.add(_bg)
+            _bg.add_done_callback(Modules._persistent_tasks.discard)
+        else:  # Disabling UserPlugin — non-blocking
             Modules.agent_flags["user_plugin_enabled"] = False
             _set_capability("user_plugin", True, "")
-            await _ensure_plugin_lifecycle_stopped()
+
+            async def _bg_plugin_disable():
+                try:
+                    await _ensure_plugin_lifecycle_stopped()
+                except Exception as exc:
+                    logger.warning("[Agent] Background plugin disable error: %s", exc)
+
+            _bg = asyncio.create_task(_bg_plugin_disable())
+            Modules._persistent_tasks.add(_bg)
+            _bg.add_done_callback(Modules._persistent_tasks.discard)
 
     try:
         new_up = Modules.agent_flags.get("user_plugin_enabled", False)
