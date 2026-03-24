@@ -9,6 +9,9 @@ Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
         throw new Error('PIXI 应用未初始化，请先调用 initPIXI()');
     }
 
+    // 卸载旧模型的快捷键监听
+    this.removeEmotionHotkeys();
+
     // 检查是否正在加载模型，防止并发加载导致重复模型叠加；如果已有加载操作正在进行，拒绝新的加载请求并明确返回错误
     if (this._isLoadingModel) {
         console.warn('模型正在加载中，跳过重复加载请求:', modelPath);
@@ -573,6 +576,7 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
             } else {
                 this.emotionMapping = this.deriveEmotionMappingFromFileRefs(this.fileReferences || {});
             }
+            if (!this.emotionMapping.hotkeys) this.emotionMapping.hotkeys = {};
 
             // 用服务器验证过的表情文件集过滤 emotionMapping，剔除磁盘上不存在的条目
             if (verifiedExpressionBasenames && this.emotionMapping && this.emotionMapping.expressions) {
@@ -600,6 +604,9 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
     // 记录模型的初始参数（用于expression重置）
     // 必须在应用常驻表情之前记录，否则记录的是已应用常驻表情后的状态
     this.recordInitialParameters();
+
+    // 安装情绪快捷键
+    this.installEmotionHotkeys();
 
     // 设置常驻表情
     try { await this.syncEmotionMappingWithServer({ replacePersistentOnly: true }); } catch(_) {}

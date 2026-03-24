@@ -955,19 +955,70 @@ Live2DManager.prototype.syncEmotionMappingWithServer = async function(options = 
         const data = await resp.json();
         if (!data || !data.success || !data.config) return;
 
-        const serverMapping = data.config || { motions: {}, expressions: {} };
-        if (!this.emotionMapping) this.emotionMapping = { motions: {}, expressions: {} };
+        const serverMapping = data.config || { motions: {}, expressions: {}, hotkeys: {} };
+        if (!this.emotionMapping) this.emotionMapping = { motions: {}, expressions: {}, hotkeys: {} };
         if (!this.emotionMapping.expressions) this.emotionMapping.expressions = {};
+        if (!this.emotionMapping.hotkeys) this.emotionMapping.hotkeys = {};
 
         if (replacePersistentOnly) {
             if (serverMapping.expressions && Array.isArray(serverMapping.expressions['常驻'])) {
                 this.emotionMapping.expressions['常驻'] = [...serverMapping.expressions['常驻']];
             }
+            // 同步热键（如果服务器有配置则覆盖）
+            if (serverMapping.hotkeys) {
+                this.emotionMapping.hotkeys = serverMapping.hotkeys;
+            }
         } else {
             this.emotionMapping = serverMapping;
+            if (!this.emotionMapping.hotkeys) this.emotionMapping.hotkeys = {};
         }
     } catch (_) {
         // 静默失败，保持现有映射
+    }
+};
+
+// 安装情绪快捷键监听
+Live2DManager.prototype.installEmotionHotkeys = function() {
+    // 清理旧监听
+    this.removeEmotionHotkeys();
+
+    const hotkeys = (this.emotionMapping && this.emotionMapping.hotkeys) || {};
+    if (!hotkeys || typeof hotkeys !== 'object') return;
+
+    const keyToEmotion = {};
+    Object.entries(hotkeys).forEach(([emotion, key]) => {
+        const k = String(key || '').trim().toLowerCase();
+        if (k) keyToEmotion[k] = emotion;
+    });
+    const keys = Object.keys(keyToEmotion);
+    if (keys.length === 0) return;
+
+    const self = this;
+    const handler = (e) => {
+        // 忽略输入类元素
+        const target = e.target;
+        const isInput = target && (
+            target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.isContentEditable
+        );
+        if (isInput) return;
+        if (e.repeat) return;
+        const key = (e.key || '').toLowerCase();
+        const emotion = keyToEmotion[key];
+        if (!emotion) return;
+        try { self.setEmotion(emotion); } catch (_) {}
+    };
+
+    window.addEventListener('keydown', handler, { passive: true });
+    this._hotkeyHandler = handler;
+};
+
+// 卸载情绪快捷键监听
+Live2DManager.prototype.removeEmotionHotkeys = function() {
+    if (this._hotkeyHandler) {
+        window.removeEventListener('keydown', this._hotkeyHandler);
+        this._hotkeyHandler = null;
     }
 };
 

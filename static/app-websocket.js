@@ -232,8 +232,11 @@
                         S.lastVoiceUserMessage = null;
                         S.lastVoiceUserMessageTime = 0;
                     }
-                    if (typeof window.appendMessage === 'function') {
-                        window.appendMessage(response.text, 'gemini', isNewMessage);
+                    // 在文本模式下不显示AI输出（因为是复读用户输入）
+                    if (!S.isTextSessionActive) {
+                        if (typeof window.appendMessage === 'function') {
+                            window.appendMessage(response.text, 'gemini', isNewMessage);
+                        }
                     }
                     if (response.turn_id) {
                         window.realisticGeminiCurrentTurnId = response.turn_id;
@@ -835,6 +838,15 @@
                             : '';
 
                         var fullText = (bufferedFullText && bufferedFullText.trim()) ? bufferedFullText : fallbackFromBubble;
+
+                        // 文本模式（Talking Avatar）：使用用户最后输入进行情感分析
+                        if (!fullText && S.isTextSessionActive) {
+                            var userMessages = document.querySelectorAll('#chatContainer .message.user');
+                            if (userMessages.length > 0) {
+                                var lastUserMsg = userMessages[userMessages.length - 1];
+                                fullText = lastUserMsg.textContent.replace(/^\[\d{2}:\d{2}:\d{2}\] \u{1F464} /, '');
+                            }
+                        }
 
                         // Trigger music bubble generation
                         if (typeof window.processMusicCommands === 'function' && fullText) {

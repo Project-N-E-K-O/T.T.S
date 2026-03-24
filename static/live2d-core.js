@@ -114,6 +114,9 @@ class Live2DManager {
         // 记录最后一次加载模型的原始路径（用于保存偏好时使用）
         this._lastLoadedModelPath = null;
 
+        // 热键绑定句柄
+        this._hotkeyHandler = null;
+
         // 防抖定时器（用于滚轮缩放等连续操作后保存位置）
         this._savePositionDebounceTimer = null;
 

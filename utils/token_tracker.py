@@ -165,7 +165,7 @@ def _file_lock(lock_path: Path, timeout: float = 10.0):
 # ---------------------------------------------------------------------------
 
 # ★ 发版前修改：遥测服务器地址。为空则不上报。
-_TELEMETRY_SERVER_URL = "http://project-neko.com.cn:8099"
+_TELEMETRY_SERVER_URL = "http://118.31.122.91:8099"
 
 if _TELEMETRY_SERVER_URL and not _TELEMETRY_SERVER_URL.startswith(("http://", "https://")):
     logger.warning("Token tracker: invalid telemetry URL scheme, disabling remote reporting")

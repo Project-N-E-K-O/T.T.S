@@ -663,6 +663,10 @@
                         <div class="multiselect-options"></div>
                     </div>
                 </div>
+                <div class="select-group">
+                    <label>快捷键 (Hotkey)</label>
+                    <input id="hotkey-happy" class="hotkey-input" maxlength="1" placeholder="输入单个按键" style="width:80px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" />
+                </div>
             </div>
 
             <!-- Sad -->
@@ -685,6 +689,10 @@
                         </div>
                         <div class="multiselect-options"></div>
                     </div>
+                </div>
+                <div class="select-group">
+                    <label>快捷键 (Hotkey)</label>
+                    <input id="hotkey-sad" class="hotkey-input" maxlength="1" placeholder="输入单个按键" style="width:80px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" />
                 </div>
             </div>
 
@@ -709,6 +717,10 @@
                         <div class="multiselect-options"></div>
                     </div>
                 </div>
+                <div class="select-group">
+                    <label>快捷键 (Hotkey)</label>
+                    <input id="hotkey-angry" class="hotkey-input" maxlength="1" placeholder="输入单个按键" style="width:80px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" />
+                </div>
             </div>
 
             <!-- Neutral -->
@@ -732,6 +744,10 @@
                         <div class="multiselect-options"></div>
                     </div>
                 </div>
+                <div class="select-group">
+                    <label>快捷键 (Hotkey)</label>
+                    <input id="hotkey-neutral" class="hotkey-input" maxlength="1" placeholder="输入单个按键" style="width:80px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" />
+                </div>
             </div>
 
             <!-- Surprised -->
@@ -754,6 +770,10 @@
                         </div>
                         <div class="multiselect-options"></div>
                     </div>
+                </div>
+                <div class="select-group">
+                    <label>快捷键 (Hotkey)</label>
+                    <input id="hotkey-surprised" class="hotkey-input" maxlength="1" placeholder="输入单个按键" style="width:80px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" />
                 </div>
             </div>
 
@@ -1246,9 +1266,17 @@
                 if (data.success && data.config) {
                     const config = data.config;
 
+                    const serverHotkeys = config.hotkeys || {};
+
                     emotions.forEach(emotion => {
                         const motionMS = document.querySelector(`.emotion-motion-select[data-emotion="${emotion}"]`);
                         const expressionMS = document.querySelector(`.emotion-expression-select[data-emotion="${emotion}"]`);
+
+                        // 填充快捷键
+                        const hotkeyInput = document.getElementById(`hotkey-${emotion}`);
+                        if (hotkeyInput) {
+                            hotkeyInput.value = serverHotkeys[emotion] || '';
+                        }
 
                         // 清除当前选择
                         if (motionMS) {
@@ -1324,7 +1352,8 @@
 
             const config = {
                 motions: {},
-                expressions: {}
+                expressions: {},
+                hotkeys: {}
             };
 
             emotions.forEach(emotion => {
@@ -1339,6 +1368,13 @@
                 if (expressionMS) {
                     const selected = Array.from(expressionMS.querySelectorAll('input:checked')).map(cb => cb.value);
                     if (selected.length > 0) config.expressions[emotion] = selected;
+                }
+
+                // 收集快捷键配置
+                const hotkeyInput = document.getElementById(`hotkey-${emotion}`);
+                if (hotkeyInput) {
+                    const key = (hotkeyInput.value || '').trim().toLowerCase();
+                    if (key) config.hotkeys[emotion] = key;
                 }
             });
 

@@ -1294,26 +1294,9 @@ class LLMSessionManager:
             # Create into a LOCAL variable — not self.session yet
             new_session = None
             if input_mode == 'text':
-                conversation_config = self._config_manager.get_model_api_config('conversation')
-                vision_config = self._config_manager.get_model_api_config('vision')
-                new_session = OmniOfflineClient(
-                    base_url=conversation_config['base_url'],
-                    api_key=conversation_config['api_key'],
-                    model=conversation_config['model'],
-                    vision_model=vision_config['model'],
-                    vision_base_url=vision_config['base_url'],
-                    vision_api_key=vision_config['api_key'],
-                    on_text_delta=self.handle_text_data,
-                    on_input_transcript=self.handle_input_transcript,
-                    on_output_transcript=self.handle_output_transcript,
-                    on_connection_error=self.handle_connection_error,
-                    on_response_done=self.handle_response_complete,
-                    on_repetition_detected=self.handle_repetition_detected,
-                    on_response_discarded=self.handle_response_discarded,
-                    on_status_message=self.send_status,
-                    max_response_length=guard_max_length
-                )
-                new_session.on_proactive_done = self.handle_proactive_complete
+                # Talking Avatar模式：文本模式不初始化LLM session，直接复读用户输入
+                logger.info("🎭 Talking Avatar模式：跳过LLM初始化")
+                return True
             else:
                 realtime_config = self._config_manager.get_model_api_config('realtime')
                 new_session = OmniRealtimeClient(
@@ -1387,18 +1370,23 @@ class LLMSessionManager:
             if isinstance(tts_result, Exception):
                 logger.error(f"TTS 启动失败: {tts_result}")
             if isinstance(llm_result, Exception):
-                raise llm_result  # LLM Session 失败是致命的
+                # 对于文本模式（Talking Avatar），LLM初始化失败不是致命的
+                if input_mode == 'text':
+                    logger.warning(f"文本模式LLM初始化失败，但继续执行: {llm_result}")
+                else:
+                    raise llm_result  # 语音模式的LLM Session 失败是致命的
             
-            # 标记 session 激活
+            # 标记 session 激活（对于文本模式，即使没有LLM session也标记为激活）
+            async with self.lock:
+                self.is_active = True
+
+            self.session_start_time = datetime.now()
+
+            # 只有存在LLM session时才启动消息处理和预热
             if self.session:
-                async with self.lock:
-                    self.is_active = True
-                    
-                self.session_start_time = datetime.now()
-                
                 # 启动消息处理任务
                 self.message_handler_task = asyncio.create_task(self.session.handle_messages())
-                
+
                 # 🔥 预热逻辑：对于语音模式，立即触发一次 skipped response 来 prefill instructions
                 # 这样可以大幅减少首轮对话的延迟（让 API 提前处理并缓存 instructions 的 KV cache）
                 # 注意：Gemini 和 Free 模型跳过预热，因为：
@@ -1411,22 +1399,22 @@ class LLMSessionManager:
                     try:
                         logger.info("🔥 开始预热 Session，prefill instructions...")
                         warmup_start = time.time()
-                        
+
                         # 设置预热标志，防止预热期间向TTS发送空包
                         self._is_warmup_in_progress = True
-                        
+
                         # 创建一个事件来等待预热完成
                         warmup_done_event = asyncio.Event()
                         original_callback = self.session.on_response_done
-                        
+
                         # 临时替换回调，只用于等待预热完成
                         async def warmup_callback():
                             warmup_done_event.set()
-                        
+
                         self.session.on_response_done = warmup_callback
-                        
+
                         await self.session.create_response("", skipped=True)
-                        
+
                         # 等待预热完成（最多12秒）
                         try:
                             await asyncio.wait_for(warmup_done_event.wait(), timeout=12.0)
@@ -1435,37 +1423,35 @@ class LLMSessionManager:
                         except asyncio.TimeoutError:
                             logger.warning("⚠️ Session预热超时（12秒），继续执行...")
                             logger.warning("[语音会话诊断] 预热在 12 秒内未完成，可能为 realtime API 响应慢")
-                        
+
                         # 恢复原始回调
                         self.session.on_response_done = original_callback
-                        
+
                     except Exception as e:
                         logger.warning(f"⚠️ Session预热失败（不影响正常使用）: {e}")
                     finally:
                         # 确保清除预热标志
                         self._is_warmup_in_progress = False
-                
-                # 启动成功，重置失败计数器
-                self.session_start_failure_count = 0
-                self.session_start_last_failure_time = None
-                self._memory_error_retry_after = 0
-                
-                logger.info(f"[语音会话诊断] 即将通知前端 session_started (start_session 总耗时: {time.time() - _diag_start:.2f}秒)")
-                # 通知前端 session 已成功启动
-                await self.send_session_started(input_mode)
-                
-                # 标记session为就绪状态并处理可能已缓存的输入数据
-                async with self.input_cache_lock:
-                    self.session_ready = True
-                
-                # 处理在session启动期间可能已经缓存的输入数据
-                await self._flush_pending_input_data()
 
-                # WebSocket 重连后，投递因断线积压的 agent 任务回调
-                if self.pending_agent_callbacks:
-                    asyncio.create_task(self.trigger_agent_callbacks())
-            else:
-                raise Exception("Session not initialized")
+            # 启动成功，重置失败计数器
+            self.session_start_failure_count = 0
+            self.session_start_last_failure_time = None
+            self._memory_error_retry_after = 0
+
+            logger.info(f"[语音会话诊断] 即将通知前端 session_started (start_session 总耗时: {time.time() - _diag_start:.2f}秒)")
+            # 通知前端 session 已成功启动
+            await self.send_session_started(input_mode)
+
+            # 标记session为就绪状态并处理可能已缓存的输入数据
+            async with self.input_cache_lock:
+                self.session_ready = True
+
+            # 处理在session启动期间可能已经缓存的输入数据
+            await self._flush_pending_input_data()
+
+            # WebSocket 重连后，投递因断线积压的 agent 任务回调
+            if self.pending_agent_callbacks:
+                asyncio.create_task(self.trigger_agent_callbacks())
         
         except Exception as e:
             # 记录失败
@@ -2391,10 +2377,11 @@ class LLMSessionManager:
                 await self.start_session(self.websocket, new=False, input_mode=mode)
                 
                 # 检查启动是否成功
-                if not self.session or not self.is_active:
+                # 对于文本模式（Talking Avatar），session为None但is_active为True是正常的
+                if not self.is_active or (mode != 'text' and not self.session):
                     logger.warning("⚠️ Session启动失败，放弃本次数据流")
                     return
-        
+
         # Session已就绪，直接处理
         await self._process_stream_data_internal(message)
     
@@ -2415,7 +2402,8 @@ class LLMSessionManager:
             return
         
         # 如果 session 不存在或不活跃，检查是否可以自动重建
-        if not self.session or not self.is_active:
+        # 对于文本模式（Talking Avatar），session为None但is_active为True是正常的
+        if not self.is_active or (input_type != 'text' and not self.session):
             # Memory Server 专属冷却检查
             if self._memory_error_retry_after and time.time() < self._memory_error_retry_after:
                 time_left = int(self._memory_error_retry_after - time.time())
@@ -2465,32 +2453,14 @@ class LLMSessionManager:
             await self.start_session(self.websocket, new=False, input_mode=mode)
             
             # 检查启动是否成功
-            if not self.session or not self.is_active:
+            # 对于文本模式（Talking Avatar），session为None但is_active为True是正常的
+            if not self.is_active or (mode != 'text' and not self.session):
                 logger.warning("⚠️ Session启动失败，放弃本次数据流")
                 return
-        
+
         try:
             if input_type == 'text':
-                # 文本模式：检查 session 类型是否正确
-                if not isinstance(self.session, OmniOfflineClient):
-                    # 检查是否允许重建session
-                    if self.session_start_failure_count >= self.session_start_max_failures:
-                        logger.error("💥 Session类型不匹配，但失败次数过多，已停止自动重建")
-                        return
-                    
-                    logger.info(f"文本模式需要 OmniOfflineClient，但当前是 {type(self.session).__name__}. 自动重建 session。")
-                    # 先关闭旧 session
-                    if self.session:
-                        await self.end_session()
-                    # 再创建新的文本模式 session
-                    await self.start_session(self.websocket, new=False, input_mode='text')
-                    
-                    # 检查重建是否成功
-                    if not self.session or not self.is_active or not isinstance(self.session, OmniOfflineClient):
-                        logger.error("💥 文本模式Session重建失败，放弃本次数据流")
-                        return
-                
-                # 文本模式：直接发送文本
+                # 文本模式：Talking Avatar模式，直接复读用户输入，不调用LLM
                 if isinstance(data, str):
                     # 先打断当前正在播放的语音（旧speech_id），避免误打断新回复
                     async with self.lock:
@@ -2504,19 +2474,19 @@ class LLMSessionManager:
                     async with self.lock:
                         self.current_speech_id = str(uuid4())
 
-                    # 文本模式：在发送用户输入前，将挂起的 agent 任务回调注入 LLM 上下文
-                    if self.pending_agent_callbacks:
-                        try:
-                            ctx = self.drain_agent_callbacks_for_llm()
-                            if ctx:
-                                await self.session.create_response(
-                                    _loc(AGENT_CALLBACK_NOTIFICATION, normalize_language_code(self.user_language, format='short')) + ctx,
-                                    skipped=False,
-                                )
-                        except Exception as _cb_err:
-                            logger.warning(f"⚠️ Agent callback injection failed: {_cb_err}")
+                    # 模拟LLM输出流程：直接复读用户输入
+                    user_text = data.strip()
 
-                    await self.session.stream_text(data)
+                    # 1. 处理新消息：清空TTS队列
+                    await self.handle_new_message()
+
+                    # 2. 发送文本数据（复读用户输入）
+                    await self.handle_text_data(user_text, is_first_chunk=True)
+
+                    # 3. 完成响应
+                    await self.handle_response_complete()
+
+                    logger.info(f"📝 Talking Avatar模式：复读用户输入 - {user_text}")
                 else:
                     logger.error(f"💥 Stream: Invalid text data type: {type(data)}")
                 return
