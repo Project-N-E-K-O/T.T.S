@@ -144,7 +144,7 @@ def sync_connector_process(message_queue, shutdown_event, lanlan_name, sync_serv
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     chat_history = []
-    default_config = {'bullet': True, 'monitor': True}
+    default_config = {'bullet': True, 'monitor': True, 'memory': True}
     if config is None:
         config = {}
     config = default_config | config
@@ -275,7 +275,7 @@ def sync_connector_process(message_queue, shutdown_event, lanlan_name, sync_serv
                                 # 增量发送：只发 /cache 未覆盖的剩余消息，触发 LLM 结算
                                 remaining = chat_history[last_synced_index:]
                                 logger.info(f"[{lanlan_name}] 热重置：聊天历史 {len(chat_history)} 条，增量 {len(remaining)} 条")
-                                if remaining:
+                                if remaining and config.get('memory', True):
                                     try:
                                         async with aiohttp.ClientSession() as session:
                                             async with session.post(
@@ -362,7 +362,7 @@ def sync_connector_process(message_queue, shutdown_event, lanlan_name, sync_serv
                                 
                                 # Turn end 轻量缓存：仅写入 recent history，不触发 LLM 摘要/整理
                                 # 主动搭话不写缓存——等用户回应后随下一轮正常 turn 一起入库
-                                if had_user_input_this_turn and not shutdown_event.is_set() and last_synced_index < len(chat_history):
+                                if config.get('memory', True) and had_user_input_this_turn and not shutdown_event.is_set() and last_synced_index < len(chat_history):
                                     new_messages = chat_history[last_synced_index:]
                                     try:
                                         async with aiohttp.ClientSession() as session:
@@ -445,7 +445,7 @@ def sync_connector_process(message_queue, shutdown_event, lanlan_name, sync_serv
                                 # 增量结算：只发 /cache 未覆盖的剩余消息，触发 LLM 结算
                                 remaining = chat_history[last_synced_index:]
                                 logger.info(f"[{lanlan_name}] 会话结束：聊天历史 {len(chat_history)} 条，增量 {len(remaining)} 条")
-                                if not shutdown_event.is_set() and remaining:
+                                if config.get('memory', True) and not shutdown_event.is_set() and remaining:
                                     try:
                                         async with aiohttp.ClientSession() as session:
                                             async with session.post(

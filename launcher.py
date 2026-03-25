@@ -334,24 +334,11 @@ def setup_job_object():
 
 # 服务器配置（按内存占用从轻到重排列，用于分步启动以降低峰值内存）
 SERVERS = [
-    {
-        'name': 'Memory Server',
-        'module': 'memory_server',
-        'port': MEMORY_SERVER_PORT,
-        'process': None,
-        'ready_event': None,
-    },
+    # T.T.S: 只启动 main_server，不需要 memory_server 和 agent_server
     {
         'name': 'Main Server',
         'module': 'main_server',
         'port': MAIN_SERVER_PORT,
-        'process': None,
-        'ready_event': None,
-    },
-    {
-        'name': 'Agent Server',
-        'module': 'agent_server',
-        'port': TOOL_SERVER_PORT,
         'process': None,
         'ready_event': None,
     },
@@ -1268,7 +1255,7 @@ def main():
         # 持续运行，监控服务器状态
         # agent_server 崩溃不应牵连 main/memory，仅记录日志。
         # 只有 main_server 或 memory_server 死亡才触发全局关闭。
-        _CRITICAL_MODULES = {"memory_server", "main_server"}
+        _CRITICAL_MODULES = {"main_server"}
         _reported_exits: set[str] = set()
         while True:
             time.sleep(5)
