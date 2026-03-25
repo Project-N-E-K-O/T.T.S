@@ -63,30 +63,40 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
         existingLockIcon.remove();
     }
 
-    // 将锁图标放在输入框的 button-group 里，不再跟随模型
-    const buttonGroup = document.getElementById('button-group');
-    if (!buttonGroup) {
-        // 没有输入框（如 viewer 模式），跳过
+    // 将锁图标浮在聊天记录区域右下角，独立层，始终可见
+    const chatWrapper = document.getElementById('chat-content-wrapper') || document.getElementById('chat-container');
+    if (!chatWrapper) {
         this.isLocked = false;
         container.style.pointerEvents = 'auto';
         return;
     }
 
+    // 确保父元素有 position，便于绝对定位
+    if (getComputedStyle(chatWrapper).position === 'static') {
+        chatWrapper.style.position = 'relative';
+    }
+
     const lockIcon = document.createElement('button');
     lockIcon.id = 'live2d-lock-icon';
     Object.assign(lockIcon.style, {
-        position: 'relative',
-        width: '32px',
-        height: '32px',
+        position: 'absolute',
+        bottom: '12px',
+        right: '12px',
+        zIndex: '999',
+        width: '36px',
+        height: '36px',
         cursor: 'pointer',
         userSelect: 'none',
-        background: 'none',
-        border: 'none',
+        background: 'rgba(255, 255, 255, 0.7)',
+        backdropFilter: 'blur(8px)',
+        border: '1px solid rgba(0, 0, 0, 0.1)',
+        borderRadius: '50%',
         padding: '0',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        flexShrink: '0'
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+        transition: 'background 0.2s ease, box-shadow 0.2s ease'
     });
 
     const iconVersion = '?v=' + Date.now();
@@ -94,20 +104,24 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
     const imgContainer = document.createElement('div');
     Object.assign(imgContainer.style, {
         position: 'relative',
-        width: '24px',
-        height: '24px'
+        width: '20px',
+        height: '20px'
     });
+
+    const isLocked = !!this.isLocked;
 
     const imgLocked = document.createElement('img');
     imgLocked.src = '/static/icons/locked_icon.png' + iconVersion;
     imgLocked.alt = 'Locked';
     Object.assign(imgLocked.style, {
         position: 'absolute',
-        width: '24px',
-        height: '24px',
+        top: '0',
+        left: '0',
+        width: '20px',
+        height: '20px',
         objectFit: 'contain',
         pointerEvents: 'none',
-        opacity: this.isLocked ? '1' : '0',
+        opacity: isLocked ? '1' : '0',
         transition: 'opacity 0.3s ease'
     });
 
@@ -116,11 +130,13 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
     imgUnlocked.alt = 'Unlocked';
     Object.assign(imgUnlocked.style, {
         position: 'absolute',
-        width: '24px',
-        height: '24px',
+        top: '0',
+        left: '0',
+        width: '20px',
+        height: '20px',
         objectFit: 'contain',
         pointerEvents: 'none',
-        opacity: this.isLocked ? '0' : '1',
+        opacity: isLocked ? '0' : '1',
         transition: 'opacity 0.3s ease'
     });
 
@@ -128,8 +144,7 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
     imgContainer.appendChild(imgUnlocked);
     lockIcon.appendChild(imgContainer);
 
-    // 插入到 button-group 的最前面（发送按钮之前）
-    buttonGroup.insertBefore(lockIcon, buttonGroup.firstChild);
+    chatWrapper.appendChild(lockIcon);
     this._lockIconElement = lockIcon;
     this._lockIconImages = {
         locked: imgLocked,
@@ -139,6 +154,16 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
     lockIcon.addEventListener('click', (e) => {
         e.stopPropagation();
         this.setLocked(!this.isLocked);
+    });
+
+    // hover 效果
+    lockIcon.addEventListener('mouseenter', () => {
+        lockIcon.style.background = 'rgba(255, 255, 255, 0.9)';
+        lockIcon.style.boxShadow = '0 2px 12px rgba(0, 0, 0, 0.2)';
+    });
+    lockIcon.addEventListener('mouseleave', () => {
+        lockIcon.style.background = 'rgba(255, 255, 255, 0.7)';
+        lockIcon.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.15)';
     });
 
     container.style.pointerEvents = this.isLocked ? 'none' : 'auto';

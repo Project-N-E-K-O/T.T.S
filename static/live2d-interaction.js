@@ -604,15 +604,12 @@ Live2DManager.prototype.enableMouseTracking = function (model, options = {}) {
 
         // 如果已经点击了"请她离开"，不显示锁按钮，但保持显示"请她回来"按钮
         if (this._goodbyeClicked) {
-            if (lockIcon) {
-                lockIcon.style.setProperty('display', 'none', 'important');
-            }
             return;
         }
 
         // isFocusing 用于控制眼睛跟踪，悬浮菜单显示不受影响
         this.isFocusing = true;
-        if (lockIcon) lockIcon.style.display = 'block';
+        // 锁图标始终可见，不在此处控制
         // 锁定状态下不显示浮动菜单
         if (floatingButtons && !this.isLocked) floatingButtons.style.display = 'flex';
 
@@ -662,7 +659,7 @@ Live2DManager.prototype.enableMouseTracking = function (model, options = {}) {
             }
 
             this.isFocusing = false;
-            if (lockIcon) lockIcon.style.display = 'none';
+            // 锁图标始终可见，不隐藏
             if (floatingButtons && !this._goodbyeClicked) {
                 floatingButtons.style.display = 'none';
             }
@@ -796,9 +793,7 @@ Live2DManager.prototype.enableMouseTracking = function (model, options = {}) {
             const floatingButtons = document.getElementById('live2d-floating-buttons');
             const returnButtonContainer = document.getElementById('live2d-return-button-container');
 
-            if (lockIcon) {
-                lockIcon.style.setProperty('display', 'none', 'important');
-            }
+            // 锁图标始终可见，不隐藏
             // 隐藏浮动按钮容器，显示"请她回来"按钮
             if (floatingButtons) {
                 floatingButtons.style.display = 'none';
