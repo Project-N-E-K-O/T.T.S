@@ -1,7 +1,15 @@
 # -*- coding: utf-8 -*-
 import sys, os
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    _PROJECT_ROOT = sys._MEIPASS  # PyInstaller: static/ 在 _MEIPASS 下
+if getattr(sys, 'frozen', False):
+    # 打包环境：数据文件从 exe 旁边的 _internal/ 读（与 tts_server 共用）
+    _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    _shared_internal = os.path.join(_exe_dir, '_internal')
+    if os.path.isdir(_shared_internal):
+        _PROJECT_ROOT = _shared_internal
+    elif hasattr(sys, '_MEIPASS'):
+        _PROJECT_ROOT = sys._MEIPASS
+    else:
+        _PROJECT_ROOT = _exe_dir
 else:
     _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _PROJECT_ROOT)

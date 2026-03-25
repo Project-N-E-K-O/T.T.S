@@ -45,32 +45,9 @@ if sys.platform == 'win32':
             if os.path.exists(dll_path):
                 binaries.append((dll_path, '.'))
 
-# 收集必要的数据文件（使用绝对路径，避免 PyInstaller 路径解析问题）
+# 数据文件不打包进 Monitor.exe —— 与 tts_server 共用 _internal/
+# Monitor.exe 放在 dist/T.T.S/ 旁边，运行时从 _internal/ 读取 static/templates/config
 datas = []
-
-# 添加 templates 目录（只包含 monitor 需要的模板）
-monitor_templates = [
-    (os.path.join(PROJECT_ROOT, 'templates', 'viewer.html'), 'templates'),
-    (os.path.join(PROJECT_ROOT, 'templates', 'subtitle.html'), 'templates'),
-]
-
-# 检查可选模板文件
-for tpl_name in ['streamer.html']:
-    tpl_path = os.path.join(PROJECT_ROOT, 'templates', tpl_name)
-    if os.path.exists(tpl_path):
-        monitor_templates.append((tpl_path, 'templates'))
-
-datas.extend(monitor_templates)
-
-# 添加 static 目录
-datas += [
-    (os.path.join(PROJECT_ROOT, 'static'), 'static'),
-]
-
-# 添加 config 目录的必要文件
-config_chars = os.path.join(PROJECT_ROOT, 'config', 'characters.json')
-if os.path.exists(config_chars):
-    datas += [(config_chars, 'config')]
 
 a = Analysis(
     [os.path.join(PROJECT_ROOT, 'monitor.py')],  # 使用绝对路径
