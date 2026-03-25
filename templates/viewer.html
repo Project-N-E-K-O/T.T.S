@@ -343,8 +343,12 @@
         window.lanlan_config = lanlan_config;
         let cubism4Model = "";
 
-        // 标记为观看模式，禁用所有交互按钮
+        // 标记为观看模式（禁用浮动按钮/锁/popup，但保留拖拽）
         window.isViewerMode = true;
+        // 允许拖拽模型（interaction.js 会检查此标志跳过 isViewerMode 的拖拽禁用）
+        window.viewerAllowDrag = true;
+        // 禁用位置持久化（monitor 不需要保存位置）
+        window.viewerNoPersist = true;
 
         // 异步获取页面配置
         async function loadPageConfig() {

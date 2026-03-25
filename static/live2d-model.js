@@ -605,11 +605,9 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
     // 必须在应用常驻表情之前记录，否则记录的是已应用常驻表情后的状态
     this.recordInitialParameters();
 
-    // 安装情绪快捷键
-    this.installEmotionHotkeys();
-
-    // 设置常驻表情
+    // 设置常驻表情（同步后再安装快捷键，确保服务器配置生效）
     try { await this.syncEmotionMappingWithServer({ replacePersistentOnly: true }); } catch(_) {}
+    this.installEmotionHotkeys();
     await this.setupPersistentExpressions();
     
     // 调用常驻表情应用完成的回调（事件驱动方式，替代不可靠的 setTimeout）

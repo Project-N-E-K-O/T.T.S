@@ -285,8 +285,8 @@ Live2DManager.prototype._checkAndPerformSnap = async function (model, options = 
 
 // 设置拖拽功能
 Live2DManager.prototype.setupDragAndDrop = function (model) {
-    // 观看模式下禁用所有交互（拖拽、点击、缩放）
-    if (window.isViewerMode) {
+    // 观看模式下禁用交互（popup、点击），但允许拖拽
+    if (window.isViewerMode && !window.viewerAllowDrag) {
         model.interactive = false;
         return;
     }
@@ -364,6 +364,9 @@ Live2DManager.prototype.setupDragAndDrop = function (model) {
             restoreButtonPointerEvents();
 
             if (!this._isModelReadyForInteraction) return;
+
+            // Monitor 模式：只允许拖拽，跳过点击检测和位置保存
+            if (window.viewerAllowDrag) return;
 
             // 检测是否为点击（非拖拽）
             const clickDuration = Date.now() - clickStartTime;
