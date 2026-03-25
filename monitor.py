@@ -37,15 +37,8 @@ logger, log_config = setup_logging(service_name="Monitor", log_level=logging.INF
 
 # 获取资源路径（支持打包后的环境）
 def get_resource_path(relative_path):
-    """获取资源的绝对路径，支持开发环境和打包后的环境"""
-    if getattr(sys, 'frozen', False):
-        if hasattr(sys, '_MEIPASS'):
-            base_path = sys._MEIPASS
-        else:
-            base_path = os.path.dirname(os.path.abspath(__file__))
-    else:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
+    """获取资源的绝对路径 — 始终基于 _PROJECT_ROOT（共用 _internal 或项目根）"""
+    return os.path.join(_PROJECT_ROOT, relative_path)
 
 templates = Jinja2Templates(directory=get_resource_path(""))
 
