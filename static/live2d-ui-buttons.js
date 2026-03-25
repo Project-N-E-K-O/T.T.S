@@ -63,18 +63,30 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
         existingLockIcon.remove();
     }
 
-    const lockIcon = document.createElement('div');
+    // 将锁图标放在输入框的 button-group 里，不再跟随模型
+    const buttonGroup = document.getElementById('button-group');
+    if (!buttonGroup) {
+        // 没有输入框（如 viewer 模式），跳过
+        this.isLocked = false;
+        container.style.pointerEvents = 'auto';
+        return;
+    }
+
+    const lockIcon = document.createElement('button');
     lockIcon.id = 'live2d-lock-icon';
     Object.assign(lockIcon.style, {
-        position: 'fixed',
-        zIndex: '99999',
+        position: 'relative',
         width: '32px',
         height: '32px',
         cursor: 'pointer',
         userSelect: 'none',
-        pointerEvents: 'auto',
-        transition: 'opacity 0.3s ease',
-        display: 'none'
+        background: 'none',
+        border: 'none',
+        padding: '0',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: '0'
     });
 
     const iconVersion = '?v=' + Date.now();
@@ -82,8 +94,8 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
     const imgContainer = document.createElement('div');
     Object.assign(imgContainer.style, {
         position: 'relative',
-        width: '32px',
-        height: '32px'
+        width: '24px',
+        height: '24px'
     });
 
     const imgLocked = document.createElement('img');
@@ -91,8 +103,8 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
     imgLocked.alt = 'Locked';
     Object.assign(imgLocked.style, {
         position: 'absolute',
-        width: '32px',
-        height: '32px',
+        width: '24px',
+        height: '24px',
         objectFit: 'contain',
         pointerEvents: 'none',
         opacity: this.isLocked ? '1' : '0',
@@ -104,8 +116,8 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
     imgUnlocked.alt = 'Unlocked';
     Object.assign(imgUnlocked.style, {
         position: 'absolute',
-        width: '32px',
-        height: '32px',
+        width: '24px',
+        height: '24px',
         objectFit: 'contain',
         pointerEvents: 'none',
         opacity: this.isLocked ? '0' : '1',
@@ -116,7 +128,8 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
     imgContainer.appendChild(imgUnlocked);
     lockIcon.appendChild(imgContainer);
 
-    document.body.appendChild(lockIcon);
+    // 插入到 button-group 的最前面（发送按钮之前）
+    buttonGroup.insertBefore(lockIcon, buttonGroup.firstChild);
     this._lockIconElement = lockIcon;
     this._lockIconImages = {
         locked: imgLocked,
@@ -129,50 +142,6 @@ Live2DManager.prototype.setupHTMLLockIcon = function(model) {
     });
 
     container.style.pointerEvents = this.isLocked ? 'none' : 'auto';
-
-    const tick = () => {
-        try {
-            if (!model || !model.parent) {
-                if (lockIcon) lockIcon.style.display = 'none';
-                return;
-            }
-            const bounds = model.getBounds();
-            const screenWidth = window.innerWidth;
-            const screenHeight = window.innerHeight;
-
-            const targetX = bounds.right * 0.7 + bounds.left * 0.3;
-            const targetY = bounds.top * 0.3 + bounds.bottom * 0.7;
-
-            lockIcon.style.left = `${Math.max(0, Math.min(targetX, screenWidth - 40))}px`;
-            lockIcon.style.top = `${Math.max(0, Math.min(targetY, screenHeight - 40))}px`;
-
-            const lockRect = lockIcon.getBoundingClientRect();
-            let isOverlapped = false;
-            document.querySelectorAll('[id^="live2d-popup-"]').forEach(popup => {
-                if (popup.style.display === 'flex' && popup.style.opacity === '1') {
-                    const popupRect = popup.getBoundingClientRect();
-                    if (lockRect.right > popupRect.left && lockRect.left < popupRect.right &&
-                        lockRect.bottom > popupRect.top && lockRect.top < popupRect.bottom) {
-                        isOverlapped = true;
-                    }
-                }
-            });
-            if (!isOverlapped) {
-                document.querySelectorAll('[data-neko-sidepanel]').forEach(panel => {
-                    if (panel.style.display !== 'none' && parseFloat(panel.style.opacity) > 0) {
-                        const panelRect = panel.getBoundingClientRect();
-                        if (lockRect.right > panelRect.left && lockRect.left < panelRect.right &&
-                            lockRect.bottom > panelRect.top && lockRect.top < panelRect.bottom) {
-                            isOverlapped = true;
-                        }
-                    }
-                });
-            }
-            lockIcon.style.opacity = isOverlapped ? '0.3' : '';
-        } catch (_) {}
-    };
-    this._lockIconTicker = tick;
-    this.pixi_app.ticker.add(tick);
 };
 
 /**

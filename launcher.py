@@ -397,7 +397,7 @@ def run_memory_server(
         # 使用 Server 对象，在启动后通知父进程
         config = uvicorn.Config(
             app=memory_server.app,
-            host="127.0.0.1",
+            host="0.0.0.0",
             port=MEMORY_SERVER_PORT,
             log_level="error",
             proxy_headers=_behind_proxy,
@@ -484,7 +484,7 @@ def run_agent_server(
         _behind_proxy = os.environ.get("NEKO_BEHIND_PROXY", "").strip().lower() in ("1", "true", "yes")
         config = uvicorn.Config(
             app=agent_server.app,
-            host="127.0.0.1",
+            host="0.0.0.0",
             port=TOOL_SERVER_PORT,
             log_level="error",
             proxy_headers=_behind_proxy,
@@ -535,7 +535,7 @@ def run_main_server(
         # 直接运行 FastAPI app，不依赖 main_server 的 __main__ 块
         config = uvicorn.Config(
             app=main_server.app,
-            host="127.0.0.1",
+            host="0.0.0.0",
             port=MAIN_SERVER_PORT,
             log_level="error",
             loop="asyncio",

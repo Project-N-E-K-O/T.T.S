@@ -285,6 +285,11 @@ Live2DManager.prototype._checkAndPerformSnap = async function (model, options = 
 
 // 设置拖拽功能
 Live2DManager.prototype.setupDragAndDrop = function (model) {
+    // 观看模式下禁用所有交互（拖拽、点击、缩放）
+    if (window.isViewerMode) {
+        model.interactive = false;
+        return;
+    }
     model.interactive = true;
     // 移除 stage.hitArea = screen，避免阻挡背景点击
     // this.pixi_app.stage.interactive = true;

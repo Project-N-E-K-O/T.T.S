@@ -536,10 +536,21 @@
         let lipSyncActive = false;
         let animationFrameId = null;
         let globalAnalyser = null;
+        let audioUnlocked = false;
+
+        // 累积回复文本，用于 turn end 时进行情绪分析
+        let responseTextBuffer = '';
 
         function initAudioContext() {
             if (!audioContext) {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            // 浏览器策略：需要用户交互后才能播放音频
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().then(() => {
+                    console.log('AudioContext resumed');
+                    audioUnlocked = true;
+                });
             }
             // 创建全局 analyser 用于口型同步
             if (!globalAnalyser && audioContext) {
@@ -548,6 +559,18 @@
                 globalAnalyser.connect(audioContext.destination);
             }
         }
+
+        // 用户首次交互时解锁音频（点击页面任意位置）
+        function unlockAudio() {
+            if (audioUnlocked) return;
+            initAudioContext();
+            audioUnlocked = true;
+            document.removeEventListener('click', unlockAudio);
+            document.removeEventListener('touchstart', unlockAudio);
+            console.log('Audio unlocked by user interaction');
+        }
+        document.addEventListener('click', unlockAudio);
+        document.addEventListener('touchstart', unlockAudio);
 
         // 将 PCM16 数据转换为 WAV 格式
         // 音频格式: 16-bit PCM, 48kHz, Mono (经过重采样后的音频)
@@ -678,6 +701,31 @@
             lipSyncActive = false;
         }
 
+        async function analyzeAndApplyEmotion(text) {
+            try {
+                const resp = await fetch('/api/emotion/analysis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        lanlan_name: lanlan_config.lanlan_name
+                    })
+                });
+                if (!resp.ok) {
+                    console.warn('[Emotion] 情绪分析请求失败:', resp.status);
+                    return;
+                }
+                const result = await resp.json();
+                if (result && result.emotion && window.LanLan1 && window.LanLan1.setEmotion) {
+                    console.log('[Emotion] 分析结果:', result.emotion);
+                    window.LanLan1.setEmotion(result.emotion);
+                }
+            } catch (e) {
+                // 静默失败（主服务器可能未运行）
+                console.debug('[Emotion] 情绪分析异常:', e.message);
+            }
+        }
+
         function connectWebSocket() {
             if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
                 return;
@@ -712,28 +760,30 @@
 
                     if (response.type === 'gemini_response') {
                         const isNewMessage = response.isNewMessage || false;
+                        if (isNewMessage) {
+                            responseTextBuffer = '';
+                        }
+                        responseTextBuffer += (response.text || '');
                         appendMessage(response.text, 'gemini', isNewMessage);
                     } else if (response.type === 'user_transcript') {
                         appendMessage(response.text, 'user', true);
                     } else if (response.type === 'user_activity') {
                         clearAudioQueue();
                     } else if (response.type === 'emotion') {
-                        // 应用情感到 Live2D 模型
                         if (window.LanLan1 && window.LanLan1.setEmotion) {
                             window.LanLan1.setEmotion(response.emotion);
                         }
                     } else if (response.type === 'expression') {
-                        // 应用表情到 Live2D 模型
-                        if (window.LanLan1 && window.LanLan1.registered_expressions) {
-                            const fn = window.LanLan1.registered_expressions[response.message];
-                            if (typeof fn === 'function') {
-                                fn();
-                            } else {
-                                console.warn('未知表情指令:', response.message);
-                            }
+                        if (window.LanLan1 && window.LanLan1.setEmotion) {
+                            window.LanLan1.setEmotion(response.message);
                         }
                     } else if (response.type === 'turn end') {
-                        // Turn ended, could add separator if needed
+                        // Turn 结束：对累积的回复文本进行情绪分析
+                        const textToAnalyze = responseTextBuffer.trim();
+                        responseTextBuffer = '';
+                        if (textToAnalyze) {
+                            analyzeAndApplyEmotion(textToAnalyze);
+                        }
                     } else if (response.type === 'heartbeat') {
                         // Heartbeat, do nothing
                     }
@@ -791,10 +841,67 @@
             try {
                 await window.pageConfigReady;
                 connectWebSocket();
+                startModelSyncPolling();
             } catch (error) {
                 console.error('初始化 WebSocket 时出错:', error);
             }
         })();
+
+        // ===== Model Sync Polling =====
+        // 定期检查主程序的模型配置，发现变化时自动切换模型
+        function startModelSyncPolling() {
+            const POLL_INTERVAL = 5000; // 每5秒检查一次
+
+            setInterval(async () => {
+                try {
+                    const apiUrl = lanlan_config.lanlan_name
+                        ? `/api/config/page_config?lanlan_name=${encodeURIComponent(lanlan_config.lanlan_name)}`
+                        : '/api/config/page_config';
+
+                    const response = await fetch(apiUrl);
+                    const data = await response.json();
+
+                    if (!data.success || !data.model_path) return;
+
+                    // 检查模型路径是否发生变化
+                    if (data.model_path !== cubism4Model && data.model_path) {
+                        console.log(`[Model Sync] 检测到模型变化: ${cubism4Model} -> ${data.model_path}`);
+                        cubism4Model = data.model_path;
+                        window.cubism4Model = cubism4Model;
+
+                        // 更新角色名（如果变化了）
+                        if (data.lanlan_name && data.lanlan_name !== lanlan_config.lanlan_name) {
+                            lanlan_config.lanlan_name = data.lanlan_name;
+                            window.lanlan_config = lanlan_config;
+                            document.title = `${lanlan_config.lanlan_name} - Viewer`;
+                            // 重连 WebSocket（角色变了，WS路径也变了）
+                            if (ws) { ws.close(); ws = null; }
+                            reconnectAttempts = 0;
+                            connectWebSocket();
+                        }
+
+                        // 重新加载 Live2D 模型
+                        if (window.live2dManager && typeof window.live2dManager.loadModel === 'function') {
+                            try {
+                                await window.live2dManager.loadModel(cubism4Model, {
+                                    isMobile: window.innerWidth <= 768
+                                });
+                                if (window.LanLan1) {
+                                    window.LanLan1.live2dModel = window.live2dManager.getCurrentModel();
+                                    window.LanLan1.currentModel = window.live2dManager.getCurrentModel();
+                                    window.LanLan1.emotionMapping = window.live2dManager.getEmotionMapping();
+                                }
+                                console.log('[Model Sync] 模型重新加载完成');
+                            } catch (e) {
+                                console.error('[Model Sync] 模型重新加载失败:', e);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    // 轮询失败时静默忽略（网络抖动等）
+                }
+            }, POLL_INTERVAL);
+        }
     </script>
 </body>
 

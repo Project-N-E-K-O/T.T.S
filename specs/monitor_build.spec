@@ -45,32 +45,32 @@ if sys.platform == 'win32':
             if os.path.exists(dll_path):
                 binaries.append((dll_path, '.'))
 
-# 收集必要的数据文件
+# 收集必要的数据文件（使用绝对路径，避免 PyInstaller 路径解析问题）
 datas = []
 
 # 添加 templates 目录（只包含 monitor 需要的模板）
 monitor_templates = [
-    ('templates/viewer.html', 'templates'),
-    ('templates/subtitle.html', 'templates'),
+    (os.path.join(PROJECT_ROOT, 'templates', 'viewer.html'), 'templates'),
+    (os.path.join(PROJECT_ROOT, 'templates', 'subtitle.html'), 'templates'),
 ]
 
-# 检查可选模板文件（如果存在则添加）
-optional_templates = ['templates/streamer.html']
-for template in optional_templates:
-    if os.path.exists(template):
-        monitor_templates.append((template, 'templates'))
+# 检查可选模板文件
+for tpl_name in ['streamer.html']:
+    tpl_path = os.path.join(PROJECT_ROOT, 'templates', tpl_name)
+    if os.path.exists(tpl_path):
+        monitor_templates.append((tpl_path, 'templates'))
 
 datas.extend(monitor_templates)
 
-# 添加 static 目录（Live2D 模型和静态资源）
+# 添加 static 目录
 datas += [
-    ('static', 'static'),
+    (os.path.join(PROJECT_ROOT, 'static'), 'static'),
 ]
 
 # 添加 config 目录的必要文件
-datas += [
-    ('config/characters.json', 'config'),
-]
+config_chars = os.path.join(PROJECT_ROOT, 'config', 'characters.json')
+if os.path.exists(config_chars):
+    datas += [(config_chars, 'config')]
 
 a = Analysis(
     [os.path.join(PROJECT_ROOT, 'monitor.py')],  # 使用绝对路径
@@ -132,6 +132,6 @@ exe = EXE(
     target_arch=platform.machine() if sys.platform == 'darwin' else None,  # 自动检测 macOS 架构 (arm64/x86_64)
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/icon.ico' if sys.platform == 'win32' else None,  # macOS 暂不使用图标
+    icon=os.path.join(PROJECT_ROOT, 'assets', 'icon.ico') if sys.platform == 'win32' else None,
 )
 

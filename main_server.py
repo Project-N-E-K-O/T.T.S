@@ -1215,7 +1215,7 @@ if __name__ == "__main__":
     _behind_proxy = os.environ.get("NEKO_BEHIND_PROXY", "").strip().lower() in ("1", "true", "yes")
     config = uvicorn.Config(
         app=app,
-        host="127.0.0.1",
+        host="0.0.0.0",
         port=MAIN_SERVER_PORT,
         log_level="info",
         loop="asyncio",
