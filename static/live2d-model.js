@@ -3,6 +3,221 @@
  * 依赖: live2d-core.js (提供 Live2DManager 类和 window.LIPSYNC_PARAMS)
  */
 
+Live2DManager.prototype._getModelSettingsJson = function(model = this.currentModel) {
+    return model && model.internalModel && model.internalModel.settings && model.internalModel.settings.json
+        ? model.internalModel.settings.json
+        : null;
+};
+
+Live2DManager.prototype._getParameterIdByIndex = function(coreModel, index) {
+    if (!coreModel || !Number.isInteger(index) || index < 0) return null;
+
+    try {
+        if (typeof coreModel.getParameterId === 'function') {
+            const paramId = coreModel.getParameterId(index);
+            if (paramId) return String(paramId);
+        }
+    } catch (_) {}
+
+    try {
+        if (Array.isArray(coreModel._parameterIds) && coreModel._parameterIds[index]) {
+            return String(coreModel._parameterIds[index]);
+        }
+    } catch (_) {}
+
+    return null;
+};
+
+Live2DManager.prototype._getEyeBlinkGroupIds = function(model = this.currentModel) {
+    const settings = this._getModelSettingsJson(model);
+    const groups = settings && Array.isArray(settings.Groups) ? settings.Groups : [];
+    const ids = [];
+
+    for (const group of groups) {
+        if (!group || String(group.Name || '').toLowerCase() !== 'eyeblink') continue;
+        if (group.Target && String(group.Target).toLowerCase() !== 'parameter') continue;
+        if (Array.isArray(group.Ids)) {
+            for (const id of group.Ids) {
+                if (id) ids.push(String(id));
+            }
+        }
+    }
+
+    return Array.from(new Set(ids));
+};
+
+Live2DManager.prototype._looksLikeEyeBlinkParamId = function(paramId) {
+    if (!paramId) return false;
+    const raw = String(paramId);
+    const lower = raw.toLowerCase();
+    const compact = lower.replace(/[^a-z0-9]/g, '');
+
+    if (
+        lower.includes('mouth') ||
+        lower.includes('eyeball') ||
+        lower.includes('eye_ball') ||
+        lower.includes('eyebrow') ||
+        lower.includes('brow') ||
+        lower.includes('eyeexpression') ||
+        lower.includes('eye_expression') ||
+        lower.includes('pupil') ||
+        lower.includes('light') ||
+        lower.includes('movement') ||
+        lower.includes('highlight') ||
+        /[口眉瞳]/.test(raw) ||
+        raw.includes('眼球') ||
+        raw.includes('視線') ||
+        raw.includes('视线') ||
+        raw.includes('ハイライト')
+    ) {
+        return false;
+    }
+
+    return (
+        /^parameye[lr]?open$/.test(compact) ||
+        /^eye[lr]?open$/.test(compact) ||
+        /^eyelid[lr]?open$/.test(compact) ||
+        compact.includes('eyeblink') ||
+        lower.includes('blink') ||
+        /まばたき|瞬き|眨眼/.test(raw)
+    );
+};
+
+Live2DManager.prototype._getEyeBlinkParamIds = function(model = this.currentModel) {
+    const ids = [];
+    const seen = new Set();
+    const add = (id) => {
+        if (!id || seen.has(id)) return;
+        seen.add(id);
+        ids.push(id);
+    };
+
+    for (const id of this._getEyeBlinkGroupIds(model)) {
+        add(id);
+    }
+
+    const coreModel = model && model.internalModel && model.internalModel.coreModel;
+    if (coreModel && typeof coreModel.getParameterCount === 'function') {
+        try {
+            const count = coreModel.getParameterCount();
+            for (let i = 0; i < count; i++) {
+                const id = this._getParameterIdByIndex(coreModel, i);
+                if (this._looksLikeEyeBlinkParamId(id)) add(id);
+            }
+        } catch (_) {}
+    }
+
+    return ids;
+};
+
+Live2DManager.prototype._isEyeBlinkParamId = function(paramId, model = this.currentModel) {
+    if (!paramId) return false;
+    const id = String(paramId);
+    const groupIds = this._getEyeBlinkGroupIds(model);
+    if (groupIds.includes(id)) return true;
+    return this._looksLikeEyeBlinkParamId(id);
+};
+
+Live2DManager.prototype._collectEyeBlinkParams = function(params) {
+    const result = {};
+    if (!params || typeof params !== 'object') return result;
+
+    for (const [paramId, value] of Object.entries(params)) {
+        if (this._isEyeBlinkParamId(paramId)) {
+            result[paramId] = value;
+        }
+    }
+
+    return result;
+};
+
+Live2DManager.prototype.getEyeBlinkDiagnostics = function() {
+    const model = this.currentModel;
+    const coreModel = model && model.internalModel && model.internalModel.coreModel;
+    const groupIds = this._getEyeBlinkGroupIds(model);
+    const ids = this._getEyeBlinkParamIds(model);
+
+    const liveValues = {};
+    if (coreModel) {
+        for (const id of ids) {
+            try {
+                const idx = coreModel.getParameterIndex(id);
+                if (idx >= 0) {
+                    const getDefault = typeof coreModel.getParameterDefaultValueByIndex === 'function'
+                        ? () => coreModel.getParameterDefaultValueByIndex(idx)
+                        : () => coreModel.getParameterDefaultValue(idx);
+                    liveValues[id] = {
+                        idx,
+                        value: coreModel.getParameterValueByIndex(idx),
+                        min: coreModel.getParameterMinimumValue(idx),
+                        max: coreModel.getParameterMaximumValue(idx),
+                        default: getDefault()
+                    };
+                }
+            } catch (e) {
+                liveValues[id] = { error: e && e.message ? e.message : String(e) };
+            }
+        }
+    }
+
+    const persistentEyeParams = {};
+    for (const [name, params] of Object.entries(this.persistentExpressionParamsByName || {})) {
+        const eyeParams = Array.isArray(params)
+            ? params.filter(p => p && this._isEyeBlinkParamId(p.Id))
+            : [];
+        if (eyeParams.length > 0) persistentEyeParams[name] = eyeParams;
+    }
+
+    return {
+        modelName: this.modelName || null,
+        modelRootPath: this.modelRootPath || null,
+        hasModel: !!model,
+        hasCoreModel: !!coreModel,
+        eyeBlinkIds: ids,
+        eyeBlinkGroupIds: groupIds,
+        eyeBlinkSource: groupIds.length > 0 ? 'Groups.EyeBlink+fallback' : 'fallback',
+        liveValues,
+        savedEyeBlinkParams: this._collectEyeBlinkParams(this.savedModelParameters || {}),
+        manualEyeBlinkParams: Array.isArray(this._manualExpressionParams)
+            ? this._manualExpressionParams.filter(p => p && this._isEyeBlinkParamId(p.Id))
+            : [],
+        persistentEyeBlinkParams: persistentEyeParams,
+        mouthOverrideInstalled: !!this._mouthOverrideInstalled,
+        shouldApplySavedParams: !!this._shouldApplySavedParams
+    };
+};
+
+Live2DManager.prototype._logEyeBlinkDiagnostics = function(reason = 'model-ready') {
+    if (typeof console === 'undefined') return;
+
+    try {
+        const diagnostics = this.getEyeBlinkDiagnostics();
+        const hasSaved = Object.keys(diagnostics.savedEyeBlinkParams || {}).length > 0;
+        const hasManual = (diagnostics.manualEyeBlinkParams || []).length > 0;
+        const hasPersistent = Object.keys(diagnostics.persistentEyeBlinkParams || {}).length > 0;
+        const hasSuspiciousState = hasSaved || hasManual || hasPersistent;
+        const prefix = hasSuspiciousState
+            ? `[Live2D EyeBlink][${reason}] 检测到可能导致闭眼的 EyeBlink 覆盖，诊断如下:`
+            : `[Live2D EyeBlink][${reason}] 自动诊断:`;
+
+        const log = hasSuspiciousState ? console.warn : console.info;
+        log.call(console, prefix, diagnostics);
+    } catch (error) {
+        console.warn('[Live2D EyeBlink] 自动诊断失败:', error);
+    }
+};
+
+Live2DManager.prototype._scheduleEyeBlinkDiagnosticsLog = function(reason = 'model-ready') {
+    if (this._eyeBlinkDiagnosticsTimer) {
+        clearTimeout(this._eyeBlinkDiagnosticsTimer);
+    }
+
+    this._eyeBlinkDiagnosticsTimer = setTimeout(() => {
+        this._eyeBlinkDiagnosticsTimer = null;
+        this._logEyeBlinkDiagnostics(reason);
+    }, 800);
+};
+
 // 加载模型
 Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
     if (!this.pixi_app) {
@@ -28,6 +243,10 @@ Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
     if (this._canvasRevealTimer) {
         clearTimeout(this._canvasRevealTimer);
         this._canvasRevealTimer = null;
+    }
+    if (this._eyeBlinkDiagnosticsTimer) {
+        clearTimeout(this._eyeBlinkDiagnosticsTimer);
+        this._eyeBlinkDiagnosticsTimer = null;
     }
 
     try {
@@ -747,6 +966,7 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
     }
     this._isModelReadyForInteraction = true;
     this._modelLoadState = 'ready';
+    this._scheduleEyeBlinkDiagnosticsLog('model-ready');
 
     // 模型完全可见后播放 Idle 情绪（替代原来的独立 setTimeout）
     if (hasIdleInEmotionMapping || hasIdleInFileReferences) {
@@ -938,6 +1158,7 @@ Live2DManager.prototype.installMouthOverride = function() {
             const preUpdateParams = {};
             if (this.savedModelParameters && this._shouldApplySavedParams) {
                 for (const paramId of Object.keys(this.savedModelParameters)) {
+                    if (this._isEyeBlinkParamId(paramId)) continue;
                     try {
                         const idx = coreModel.getParameterIndex(paramId);
                         if (idx >= 0) {
@@ -1015,6 +1236,8 @@ Live2DManager.prototype.installMouthOverride = function() {
                     const persistentParamIds = this.getPersistentExpressionParamIds();
                     
                     for (const [paramId, value] of Object.entries(this.savedModelParameters)) {
+                        // EyeBlink belongs to the model/runtime blink system, not saved parameters.
+                        if (this._isEyeBlinkParamId(paramId)) continue;
                         // 跳过口型参数
                         if (lipSyncParams.includes(paramId)) continue;
                         // 跳过可见性参数
@@ -1062,6 +1285,7 @@ Live2DManager.prototype.installMouthOverride = function() {
                         if (Array.isArray(params)) {
                             for (const p of params) {
                                 if (lipSyncParams.includes(p.Id)) continue;
+                                if (this._isEyeBlinkParamId(p.Id)) continue;
                                 try {
                                     coreModel.setParameterValueById(p.Id, p.Value);
                                 } catch (_) {}
@@ -1131,6 +1355,7 @@ Live2DManager.prototype.installMouthOverride = function() {
                     if (Array.isArray(params)) {
                         for (const p of params) {
                             if (lipSyncParams.includes(p.Id)) continue;
+                            if (this._isEyeBlinkParamId(p.Id)) continue;
                             try {
                                 currentCoreModel.setParameterValueById(p.Id, p.Value);
                             } catch (_) {}
@@ -1366,6 +1591,10 @@ Live2DManager.prototype.applyModelParameters = function(model, parameters) {
                 if (typeof value !== 'number' || !Number.isFinite(value)) {
                     continue;
                 }
+
+                if (this._isEyeBlinkParamId(paramId)) {
+                    continue;
+                }
                 
                 // 跳过常驻表情已设置的参数（保护去水印等功能）
                 if (persistentParamIds.has(paramId)) {
@@ -1383,6 +1612,10 @@ Live2DManager.prototype.applyModelParameters = function(model, parameters) {
                     const parsedIndex = parseInt(indexStr, 10);
                     if (!isNaN(parsedIndex) && parsedIndex >= 0 && parsedIndex < coreModel.getParameterCount()) {
                         idx = parsedIndex;
+                        const actualParamId = this._getParameterIdByIndex(coreModel, idx);
+                        if (this._isEyeBlinkParamId(actualParamId)) {
+                            continue;
+                        }
                     }
                 } else {
                     try {
@@ -1414,6 +1647,7 @@ Live2DManager.prototype.getPersistentExpressionParamIds = function() {
             if (Array.isArray(params)) {
                 for (const p of params) {
                     if (p && p.Id) {
+                        if (this._isEyeBlinkParamId(p.Id)) continue;
                         paramIds.add(p.Id);
                     }
                 }

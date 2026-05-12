@@ -52,6 +52,8 @@ __pycache__/
 .venv_monitor/
 # Playwright browsers cache (used by build_nuitka.bat, not for repo)
 playwright_browsers/
+.playwright-cli/
+output/
 .env
 .env.local
 .env.development.local

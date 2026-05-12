@@ -1352,6 +1352,14 @@ if (saveBtn) {
                     } catch (e) {
                         paramId = `param_${i}`;
                     }
+                    const resolvedParamId = (window.live2dManager && typeof window.live2dManager._getParameterIdByIndex === 'function')
+                        ? (window.live2dManager._getParameterIdByIndex(coreModel, i) || paramId)
+                        : paramId;
+                    if (window.live2dManager &&
+                        typeof window.live2dManager._isEyeBlinkParamId === 'function' &&
+                        window.live2dManager._isEyeBlinkParamId(resolvedParamId)) {
+                        continue;
+                    }
                     const value = coreModel.getParameterValueByIndex(i);
                     paramsToSave[paramId] = value;
                 } catch (e) {
