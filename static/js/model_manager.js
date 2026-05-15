@@ -5887,7 +5887,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // 删除模型功能
-    let selectedDeleteModels = new Map();
+    let selectedDeleteModels = new Set();
 
     function showDeleteModelModal() {
         if (deleteModelModal) {
@@ -5922,6 +5922,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Live2D 模型
             if (live2dResult.success && Array.isArray(live2dResult.models)) {
                 live2dResult.models.forEach(m => {
+                    // /api/live2d/user_models may include non-Live2D entries for legacy callers.
+                    // Keep untyped Live2D/broken entries, but do not route VRM/MMD through Live2D deletion.
+                    if (m.type === 'vrm' || m.type === 'mmd') return;
                     allUserModels.push({
                         id: 'live2d:' + m.name,
                         name: m.name,
