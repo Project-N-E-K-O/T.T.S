@@ -205,7 +205,7 @@ class Live2DManager {
             autoStart: true,
             transparent: true,
             backgroundAlpha: 0,
-            resolution: window.devicePixelRatio || 1,
+            resolution: this._getRenderResolutionForQuality(window.renderQuality || 'medium'),
             autoDensity: true
         };
 
@@ -360,6 +360,30 @@ class Live2DManager {
             this.pixi_app.ticker.start();
             console.log('[Live2D Core] 渲染循环已恢复');
         }
+    }
+
+    _getRenderResolutionForQuality(quality) {
+        const deviceRatio = Math.max(1, window.devicePixelRatio || 1);
+        if (quality === 'low') {
+            return Math.max(0.75, Math.min(deviceRatio * 0.75, 1));
+        }
+        if (quality === 'high') {
+            return deviceRatio;
+        }
+        return Math.max(1, Math.min(deviceRatio, 1.5));
+    }
+
+    applyRenderQuality(quality) {
+        if (!this.pixi_app || !this.pixi_app.renderer) return;
+        const renderer = this.pixi_app.renderer;
+        const resolution = this._getRenderResolutionForQuality(quality || 'medium');
+        if (Math.abs((renderer.resolution || 1) - resolution) < 0.001) return;
+
+        const width = Math.max(renderer.screen?.width || window.innerWidth || window.screen.width || 1, 1);
+        const height = Math.max(renderer.screen?.height || window.innerHeight || window.screen.height || 1, 1);
+        renderer.resolution = resolution;
+        renderer.resize(width, height);
+        console.log('[Live2D Core] 画质已应用:', { quality, resolution, width, height });
     }
 
     /**
@@ -757,110 +781,13 @@ window.addEventListener('neko-frame-rate-changed', (e) => {
     }
 });
 
-// 监听画质变更事件：需要重新加载模型以应用新的纹理降采样
-let _qualityChangePending = false;
-let _qualityChangeQueued = null;
-
+// 监听画质变更事件：只调整 renderer 分辨率，不重载当前模型。
 window.addEventListener('neko-render-quality-changed', (e) => {
     const quality = e.detail?.quality;
     if (!quality || !window.live2dManager) return;
-    
-    _qualityChangeQueued = quality;
-    
-    if (_qualityChangePending) {
-        console.log(`[Live2D] 画质变更请求排队中: ${quality}`);
-        return;
+    try {
+        window.live2dManager.applyRenderQuality(quality);
+    } catch (err) {
+        console.warn('[Live2D] 应用画质设置失败:', err);
     }
-    
-    const processQualityChange = async () => {
-        const mgr = window.live2dManager;
-        if (!mgr || !mgr.currentModel) return;
-        
-        const currentQuality = _qualityChangeQueued;
-        _qualityChangeQueued = null;
-        
-        if (!currentQuality) return;
-        
-        if (!mgr.currentModel) return;
-        
-        _qualityChangePending = true;
-        
-        try {
-            if (mgr._isLoadingModel) {
-                console.log('[Live2D] 等待当前模型加载完成后重新加载...');
-                await new Promise((resolve) => {
-                    const checkInterval = setInterval(() => {
-                        if (!mgr._isLoadingModel) {
-                            clearInterval(checkInterval);
-                            clearTimeout(waitTimeout);
-                            resolve();
-                        }
-                    }, 100);
-                    const waitTimeout = setTimeout(() => {
-                        clearInterval(checkInterval);
-                        console.warn('[Live2D] 等待模型加载超时(30秒)，继续执行...');
-                        resolve();
-                    }, 30000);
-                });
-            }
-            
-            if (!mgr.currentModel) return;
-            
-            const modelPath = mgr._lastLoadedModelPath;
-            if (!modelPath) return;
-            
-            console.log(`[Live2D] 画质变更为 ${currentQuality}，重新加载模型以应用纹理降采样`);
-            
-            const modelForSave = mgr.currentModel;
-            
-            try {
-                const textures = modelForSave.textures;
-                if (textures) {
-                    textures.forEach(tex => {
-                        if (tex?.baseTexture) {
-                            tex.baseTexture.destroy();
-                        }
-                    });
-                }
-            } catch (err) {
-                console.warn('[Live2D] 清理纹理缓存时出错:', err);
-            }
-            
-            const scaleX = modelForSave.scale.x;
-            const scaleY = modelForSave.scale.y;
-            const posX = modelForSave.x;
-            const posY = modelForSave.y;
-            
-            const scaleObj = { x: scaleX, y: scaleY };
-            const positionObj = { x: posX, y: posY };
-            let savedPreferences = null;
-            
-            if (isValidModelPreferences(scaleObj, positionObj)) {
-                savedPreferences = {
-                    scale: scaleObj,
-                    position: positionObj
-                };
-            } else {
-                console.warn('[Live2D] 当前模型的 scale/position 无效，跳过保存偏好:', {
-                    scaleX, scaleY, posX, posY
-                });
-            }
-            
-            if (mgr._lastLoadedModelPath !== modelPath) {
-                console.warn('[Live2D] 模型已切换，跳过此次画质变更加载');
-                return;
-            }
-            
-            await mgr.loadModel(modelPath, savedPreferences ? { preferences: savedPreferences } : undefined);
-        } catch (err) {
-            console.warn('[Live2D] 画质变更后重新加载模型失败:', err);
-        } finally {
-            _qualityChangePending = false;
-            if (_qualityChangeQueued) {
-                setTimeout(processQualityChange, 50);
-            }
-        }
-    };
-    
-    processQualityChange();
 });

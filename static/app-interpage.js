@@ -479,6 +479,7 @@
                                 window.LanLan1.live2dModel = window.live2dManager.getCurrentModel();
                                 window.LanLan1.currentModel = window.live2dManager.getCurrentModel();
                             }
+                            await restoreLive2DIdleAnimationOnMainPage();
                         } else {
                             console.error('[Model] Live2D 管理器初始化失败');
                         }
@@ -520,6 +521,110 @@
                 window._pendingModelReload = false;
                 setTimeout(function () { handleModelReload(); }, 100);
             }
+        }
+    }
+
+    function getLive2DIdleAnimationFromCharacter(charData) {
+        return charData?._reserved?.avatar?.live2d?.idle_animation
+            ?? charData?.avatar?.live2d?.idle_animation
+            ?? charData?.live2d_idle_animation
+            ?? '';
+    }
+
+    function resolveLive2DModelFilesApi(modelPath, charData) {
+        var savedModelPath = charData?._reserved?.avatar?.live2d?.model_path
+            || charData?.avatar?.live2d?.model_path
+            || charData?.live2d
+            || modelPath
+            || '';
+        var itemId = charData?._reserved?.avatar?.asset_source_id || charData?.live2d_item_id || charData?.item_id || '';
+        if (itemId) return '/api/live2d/model_files_by_id/' + encodeURIComponent(itemId);
+
+        var workshopMatch = String(savedModelPath).match(/^\/?workshop\/([^/]+)/);
+        if (workshopMatch) return '/api/live2d/model_files_by_id/' + encodeURIComponent(workshopMatch[1]);
+
+        var cleanPath = String(savedModelPath).replace(/\\/g, '/').replace(/^\/+/, '');
+        var parts = cleanPath.split('/').filter(Boolean);
+        var modelName = '';
+        if (cleanPath.endsWith('.model3.json')) {
+            modelName = parts.length > 1 ? parts[parts.length - 2] : parts[0].replace(/\.model3\.json$/i, '');
+        } else {
+            modelName = parts[parts.length - 1] || cleanPath;
+        }
+        return modelName ? '/api/live2d/model_files/' + encodeURIComponent(modelName) : '';
+    }
+
+    function injectLive2DPreviewAllMotionGroup(live2dModel, motionFiles) {
+        if (!live2dModel?.internalModel?.motionManager || !Array.isArray(motionFiles)) return false;
+        var motionsList = motionFiles.map(function (file) { return { File: file }; });
+        var internalModel = live2dModel.internalModel;
+        var motionManager = internalModel.motionManager;
+        var groupName = 'PreviewAll';
+
+        if (!motionManager.definitions) motionManager.definitions = {};
+        motionManager.definitions[groupName] = motionsList;
+        if (!motionManager.motionGroups) motionManager.motionGroups = {};
+        if (!motionManager.motionGroups[groupName]) motionManager.motionGroups[groupName] = [];
+
+        if (!internalModel.settings) internalModel.settings = {};
+        if (!internalModel.settings.motions) internalModel.settings.motions = {};
+        internalModel.settings.motions[groupName] = motionsList;
+        if (!internalModel.settings.json) internalModel.settings.json = {};
+        if (!internalModel.settings.json.FileReferences) internalModel.settings.json.FileReferences = {};
+        if (!internalModel.settings.json.FileReferences.Motions) internalModel.settings.json.FileReferences.Motions = {};
+        internalModel.settings.json.FileReferences.Motions[groupName] = motionsList;
+
+        if (!live2dModel.fileReferences) live2dModel.fileReferences = {};
+        if (!live2dModel.fileReferences.Motions) live2dModel.fileReferences.Motions = {};
+        live2dModel.fileReferences.Motions[groupName] = motionsList;
+        return true;
+    }
+
+    async function restoreLive2DIdleAnimationOnMainPage() {
+        try {
+            var lanlanName = window.lanlan_config?.lanlan_name || '';
+            var live2dModel = window.live2dManager?.getCurrentModel?.();
+            if (!lanlanName || !live2dModel) return false;
+
+            var initialModel = live2dModel;
+            var response = await fetch('/api/characters/');
+            var data = await response.json();
+            var charData = data?.['猫娘']?.[lanlanName];
+            var idleMotion = getLive2DIdleAnimationFromCharacter(charData);
+            if (!idleMotion || idleMotion === '_no_motion_') return false;
+
+            var filesApi = resolveLive2DModelFilesApi(window.cubism4Model || window.lanlan_config?.model_path || '', charData);
+            if (!filesApi) return false;
+            var filesResponse = await fetch(filesApi);
+            var filesData = await filesResponse.json();
+            var motionFiles = filesData?.motion_files || [];
+            var motionIndex = motionFiles.indexOf(idleMotion);
+            if (motionIndex < 0) {
+                console.warn('[Live2D Main] Saved idle motion is not in the current model:', idleMotion);
+                return false;
+            }
+            if (window.live2dManager?.getCurrentModel?.() !== initialModel) return false;
+
+            if (!injectLive2DPreviewAllMotionGroup(initialModel, motionFiles)) return false;
+            var motionManager = initialModel.internalModel.motionManager;
+            await motionManager.loadMotion('PreviewAll', motionIndex);
+            if (window.live2dManager?.getCurrentModel?.() !== initialModel) return false;
+
+            var motionInstance = motionManager.motionGroups?.PreviewAll?.[motionIndex];
+            if (motionInstance) {
+                if (typeof motionInstance.setIsLoop === 'function') {
+                    motionInstance.setIsLoop(true);
+                } else if (motionInstance._loop !== undefined) {
+                    motionInstance._loop = true;
+                }
+            }
+            motionManager.stopAllMotions();
+            initialModel.motion('PreviewAll', motionIndex, 3);
+            console.log('[Live2D Main] Restored idle motion:', idleMotion);
+            return true;
+        } catch (error) {
+            console.warn('[Live2D Main] Failed to restore idle motion:', error);
+            return false;
         }
     }
 
@@ -762,6 +867,7 @@
     mod.handleHideMainUI = handleHideMainUI;
     mod.handleShowMainUI = handleShowMainUI;
     mod.handleMemoryEdited = handleMemoryEdited;
+    mod.restoreLive2DIdleAnimationOnMainPage = restoreLive2DIdleAnimationOnMainPage;
     mod.cleanupLive2DOverlayUI = cleanupLive2DOverlayUI;
     mod.cleanupVRMOverlayUI = cleanupVRMOverlayUI;
     mod.cleanupMMDOverlayUI = cleanupMMDOverlayUI;
@@ -770,9 +876,15 @@
     window.handleModelReload = handleModelReload;
     window.handleHideMainUI = handleHideMainUI;
     window.handleShowMainUI = handleShowMainUI;
+    window.restoreLive2DIdleAnimationOnMainPage = restoreLive2DIdleAnimationOnMainPage;
     window.cleanupLive2DOverlayUI = cleanupLive2DOverlayUI;
     window.cleanupVRMOverlayUI = cleanupVRMOverlayUI;
     window.cleanupMMDOverlayUI = cleanupMMDOverlayUI;
 
     window.appInterpage = mod;
+    if (window.live2dManager?.getCurrentModel?.()) {
+        setTimeout(function () {
+            restoreLive2DIdleAnimationOnMainPage();
+        }, 0);
+    }
 })();

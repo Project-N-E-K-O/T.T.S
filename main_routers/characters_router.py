@@ -15,6 +15,7 @@ import asyncio
 import copy
 import base64
 import hashlib
+import re
 from datetime import datetime
 import pathlib
 import wave
@@ -30,7 +31,7 @@ from main_logic.tts_client import get_custom_tts_voices, CustomTTSVoiceFetchErro
 from utils.config_manager import get_reserved, set_reserved, flatten_reserved
 from utils.audio import normalize_voice_clone_api_audio
 from utils.file_utils import atomic_write_json
-from utils.frontend_utils import find_models, find_model_directory, is_user_imported_model
+from utils.frontend_utils import find_models, find_model_directory, is_user_imported_model, find_workshop_item_by_id
 from utils.language_utils import normalize_language_code
 from utils.logger_config import get_module_logger
 from utils.url_utils import encode_url_path
@@ -38,6 +39,54 @@ from config import MEMORY_SERVER_PORT, TFLINK_UPLOAD_URL, CHARACTER_RESERVED_FIE
 
 router = APIRouter(prefix="/api/characters", tags=["characters"])
 logger = get_module_logger(__name__, "Main")
+
+
+def _find_live2d_motion_files(model_name: str, item_id: str = "") -> set[str]:
+    """Return motion paths relative to the resolved Live2D model root."""
+    model_dir = None
+    if item_id:
+        try:
+            model_dir, _ = find_workshop_item_by_id(str(item_id))
+        except Exception as exc:
+            logger.warning("[Live2D Save] Failed to resolve workshop model %s: %s", item_id, exc)
+
+    if not model_dir or not os.path.exists(model_dir):
+        try:
+            model_dir, _ = find_model_directory(model_name)
+        except Exception as exc:
+            logger.warning("[Live2D Save] Failed to resolve model %s: %s", model_name, exc)
+            model_dir = None
+
+    if not model_dir or not os.path.isdir(model_dir):
+        return set()
+
+    actual_model_dir = model_dir
+    for root, _, files in os.walk(model_dir):
+        if any(file.endswith(".model3.json") for file in files):
+            actual_model_dir = root
+            break
+
+    motion_files: set[str] = set()
+    for root, _, files in os.walk(actual_model_dir):
+        for file in files:
+            if file.endswith(".motion3.json"):
+                rel = os.path.relpath(os.path.join(root, file), actual_model_dir)
+                motion_files.add(rel.replace(os.path.sep, "/"))
+    return motion_files
+
+
+def _validate_live2d_idle_animation_path(value: str) -> str | None:
+    if "://" in value or value.startswith("data:"):
+        return "Live2D idle animation must be a relative model motion path"
+    if "\\" in value:
+        return "Live2D idle animation path must use forward slashes"
+    if value.startswith("/") or re.match(r"^[A-Za-z]:", value):
+        return "Live2D idle animation path must not be absolute"
+    if ".." in value:
+        return "Live2D idle animation path must not contain path traversal"
+    if not value.lower().endswith(".motion3.json"):
+        return "Live2D idle animation must be a .motion3.json file"
+    return None
 
 
 PROFILE_NAME_MAX_UNITS = 20
@@ -715,6 +764,31 @@ async def update_catgirl_l2d(name: str, request: Request):
                 live2d_model_path,
             )
             set_reserved(characters['猫娘'][name], 'avatar', 'model_type', 'live2d')
+            if 'live2d_idle_animation' in data:
+                live2d_idle_animation = data.get('live2d_idle_animation')
+                if live2d_idle_animation is None:
+                    live2d_idle_str = ''
+                else:
+                    if not isinstance(live2d_idle_animation, str):
+                        return JSONResponse(content={'success': False, 'error': 'live2d_idle_animation must be a string or null'}, status_code=400)
+                    live2d_idle_str = live2d_idle_animation.strip()
+
+                if not live2d_idle_str or live2d_idle_str == '_no_motion_':
+                    set_reserved(characters['猫娘'][name], 'avatar', 'live2d', 'idle_animation', '')
+                    logger.debug("Cleared Live2D idle animation for %s", name)
+                else:
+                    validation_error = _validate_live2d_idle_animation_path(live2d_idle_str)
+                    if validation_error:
+                        return JSONResponse(content={'success': False, 'error': validation_error}, status_code=400)
+
+                    motion_files = _find_live2d_motion_files(live2d_model_path, item_id)
+                    if motion_files and live2d_idle_str not in motion_files:
+                        return JSONResponse(
+                            content={'success': False, 'error': 'Live2D idle animation does not belong to the current model'},
+                            status_code=400,
+                        )
+                    set_reserved(characters['猫娘'][name], 'avatar', 'live2d', 'idle_animation', live2d_idle_str)
+                    logger.debug("Saved Live2D idle animation for %s: %s", name, live2d_idle_str)
             if item_id:
                 set_reserved(characters['猫娘'][name], 'avatar', 'asset_source_id', str(item_id))
                 set_reserved(characters['猫娘'][name], 'avatar', 'asset_source', 'steam_workshop')

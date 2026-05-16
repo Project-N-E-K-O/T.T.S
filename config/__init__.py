@@ -32,6 +32,7 @@ CHARACTER_SYSTEM_RESERVED_FIELDS = (
     "lighting",
     "vrm_rotation",
     "live2d_item_id",
+    "live2d_idle_animation",
     "item_id",
     "idleAnimation",
     "mmd",
@@ -73,6 +74,7 @@ RESERVED_FIELD_SCHEMA = {
         "asset_source_id": str,
         "live2d": {
             "model_path": str,
+            "idle_animation": str,
         },
         "vrm": {
             "model_path": str,
@@ -103,6 +105,7 @@ LEGACY_FLAT_TO_RESERVED = {
     "live2d_item_id": ("avatar", "asset_source_id"),
     "item_id": ("avatar", "asset_source_id"),
     "live2d": ("avatar", "live2d", "model_path"),
+    "live2d_idle_animation": ("avatar", "live2d", "idle_animation"),
     "vrm": ("avatar", "vrm", "model_path"),
     "vrm_animation": ("avatar", "vrm", "animation"),
     "idleAnimation": ("avatar", "vrm", "idle_animation"),
@@ -273,6 +276,7 @@ DEFAULT_LANLAN_TEMPLATE = {
                 "asset_source_id": "",
                 "live2d": {
                     "model_path": "mao_pro/mao_pro.model3.json",
+                    "idle_animation": "",
                 },
                 "vrm": {
                     "model_path": "",
@@ -758,4 +762,3 @@ __all__ = [
     'DEFAULT_AGENT_MODEL_URL',
     'DEFAULT_AGENT_MODEL_API_KEY',
 ]
-

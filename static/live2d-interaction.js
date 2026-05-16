@@ -1589,6 +1589,68 @@ Live2DManager.prototype.playTutorialMotion = async function() {
 /**
  * 触发随机表情和动作（用于教程模式和点击空白区域）
  */
+Live2DManager.prototype._restoreIdleAnimationAfterTemporaryMotion = async function() {
+    if (typeof window.restoreLive2DIdleAnimationOnMainPage !== 'function') return;
+    try {
+        await window.restoreLive2DIdleAnimationOnMainPage();
+    } catch (error) {
+        console.warn('[Interaction] 恢复 Live2D 待机动作失败:', error);
+    }
+};
+
+Live2DManager.prototype._withTemporaryMotionDefinition = async function(groupName, index, motion, callback) {
+    const internalModel = this.currentModel?.internalModel;
+    const motionManager = internalModel?.motionManager;
+    if (!internalModel || !motionManager || !motion?.File) {
+        return callback();
+    }
+
+    const backup = {
+        definitions: motionManager.definitions?.[groupName],
+        motionGroups: motionManager.motionGroups?.[groupName],
+        settingsMotions: internalModel.settings?.motions?.[groupName],
+        jsonFileRefs: internalModel.settings?.json?.FileReferences?.Motions?.[groupName],
+    };
+    const had = {
+        definitions: !!(motionManager.definitions && Object.prototype.hasOwnProperty.call(motionManager.definitions, groupName)),
+        motionGroups: !!(motionManager.motionGroups && Object.prototype.hasOwnProperty.call(motionManager.motionGroups, groupName)),
+        settingsMotions: !!(internalModel.settings?.motions && Object.prototype.hasOwnProperty.call(internalModel.settings.motions, groupName)),
+        jsonFileRefs: !!(internalModel.settings?.json?.FileReferences?.Motions && Object.prototype.hasOwnProperty.call(internalModel.settings.json.FileReferences.Motions, groupName)),
+    };
+
+    try {
+        if (!motionManager.definitions) motionManager.definitions = {};
+        if (!motionManager.definitions[groupName]) motionManager.definitions[groupName] = [];
+        motionManager.definitions[groupName][index] = motion;
+
+        if (!motionManager.motionGroups) motionManager.motionGroups = {};
+        if (!motionManager.motionGroups[groupName]) motionManager.motionGroups[groupName] = [];
+
+        if (!internalModel.settings) internalModel.settings = {};
+        if (!internalModel.settings.motions) internalModel.settings.motions = {};
+        if (!internalModel.settings.motions[groupName]) internalModel.settings.motions[groupName] = [];
+        internalModel.settings.motions[groupName][index] = motion;
+
+        if (!internalModel.settings.json) internalModel.settings.json = {};
+        if (!internalModel.settings.json.FileReferences) internalModel.settings.json.FileReferences = {};
+        if (!internalModel.settings.json.FileReferences.Motions) internalModel.settings.json.FileReferences.Motions = {};
+        if (!internalModel.settings.json.FileReferences.Motions[groupName]) internalModel.settings.json.FileReferences.Motions[groupName] = [];
+        internalModel.settings.json.FileReferences.Motions[groupName][index] = motion;
+
+        await motionManager.loadMotion(groupName, index);
+        return await callback();
+    } finally {
+        if (had.definitions) motionManager.definitions[groupName] = backup.definitions;
+        else if (motionManager.definitions) delete motionManager.definitions[groupName];
+        if (had.motionGroups) motionManager.motionGroups[groupName] = backup.motionGroups;
+        else if (motionManager.motionGroups) delete motionManager.motionGroups[groupName];
+        if (had.settingsMotions) internalModel.settings.motions[groupName] = backup.settingsMotions;
+        else if (internalModel.settings?.motions) delete internalModel.settings.motions[groupName];
+        if (had.jsonFileRefs) internalModel.settings.json.FileReferences.Motions[groupName] = backup.jsonFileRefs;
+        else if (internalModel.settings?.json?.FileReferences?.Motions) delete internalModel.settings.json.FileReferences.Motions[groupName];
+    }
+};
+
 Live2DManager.prototype.triggerRandomEmotion = async function() {
     // 清除之前的点击效果恢复定时器
     if (this._clickEffectRestoreTimer) {
@@ -1709,12 +1771,16 @@ Live2DManager.prototype.triggerRandomEmotion = async function() {
         this._currentClickEffectId = null;
         // 使用平滑过渡恢复到常驻表情或默认状态（smoothReset 内部会在快照后停止 motion/expression）
         if (typeof this.smoothResetToInitialState === 'function') {
-            this.smoothResetToInitialState().catch(e => {
+            this.smoothResetToInitialState().then(() => {
+                return this._restoreIdleAnimationAfterTemporaryMotion?.();
+            }).catch(e => {
                 console.warn('[Interaction] 平滑恢复失败，回退到即时恢复:', e);
                 if (typeof this.clearExpression === 'function') this.clearExpression();
+                this._restoreIdleAnimationAfterTemporaryMotion?.();
             });
         } else if (typeof this.clearExpression === 'function') {
             this.clearExpression();
+            this._restoreIdleAnimationAfterTemporaryMotion?.();
         }
     }, window.live2dManager.CLICK_EFFECT_DURATION);
 };
@@ -1882,7 +1948,9 @@ Live2DManager.prototype._playTouchSetAnimation = async function(hitAreaId) {
                             }
                             
                             try {
-                                const result = await this.currentModel.motion(groupName, index, 2);
+                                const result = await this._withTemporaryMotionDefinition(groupName, index, motion, async () => {
+                                    return await this.currentModel.motion(groupName, index, 2);
+                                });
                                 if (result) {
                                     console.log(`[TouchSet] 成功播放动作: ${groupName}[${index}]`);
                                 } else {
@@ -1911,15 +1979,27 @@ Live2DManager.prototype._playTouchSetAnimation = async function(hitAreaId) {
                     await this.playExpression(randomExpressionName, faceInfo.File);
                     console.log(`[TouchSet] 播放表情成功: ${randomExpressionName}, 持续时间: ${faceHoldingTime}ms`);
                     
-                    clearTimeout(this.expressionTimer);
-                    this.expressionTimer = setTimeout(() => {
-                        this.clearExpression?.();
-                    }, faceHoldingTime);
                 } catch (e) {
                     console.warn(`[TouchSet] 播放表情失败: ${randomExpressionName}`, e);
                 }
             }
 
+        }
+        if (motions.length > 0 || expressions.length > 0) {
+            clearTimeout(this.expressionTimer);
+            this.expressionTimer = setTimeout(async () => {
+                if (typeof this.smoothResetToInitialState === 'function') {
+                    try {
+                        await this.smoothResetToInitialState();
+                    } catch (error) {
+                        console.warn('[TouchSet] 平滑恢复失败，回退到清除表情:', error);
+                        this.clearExpression?.();
+                    }
+                } else {
+                    this.clearExpression?.();
+                }
+                await this._restoreIdleAnimationAfterTemporaryMotion?.();
+            }, faceHoldingTime);
         }
     } catch (error) {
         console.warn(`[TouchSet] 播放动画失败:`, error);

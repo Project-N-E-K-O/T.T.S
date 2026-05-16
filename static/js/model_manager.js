@@ -668,6 +668,40 @@ const RequestHelper = {
     }
 };
 
+function getLive2DIdleAnimationFromCharacter(charData) {
+    return charData?._reserved?.avatar?.live2d?.idle_animation
+        ?? charData?.avatar?.live2d?.idle_animation
+        ?? charData?.live2d_idle_animation
+        ?? '';
+}
+
+async function playLive2DPreviewMotionLoop(live2dModel, motionFiles, motionPath) {
+    if (!live2dModel || !Array.isArray(motionFiles) || !motionPath) return false;
+    const motionIndex = motionFiles.indexOf(motionPath);
+    if (motionIndex < 0) return false;
+    const motionManager = live2dModel.internalModel?.motionManager;
+    if (!motionManager) return false;
+    const groupName = 'PreviewAll';
+
+    if (!motionManager.definitions) motionManager.definitions = {};
+    motionManager.definitions[groupName] = motionFiles.map(file => ({ File: file }));
+    if (!motionManager.motionGroups) motionManager.motionGroups = {};
+    if (!motionManager.motionGroups[groupName]) motionManager.motionGroups[groupName] = [];
+
+    await motionManager.loadMotion(groupName, motionIndex);
+    const motionInstance = motionManager.motionGroups?.[groupName]?.[motionIndex];
+    if (motionInstance) {
+        if (typeof motionInstance.setIsLoop === 'function') {
+            motionInstance.setIsLoop(true);
+        } else if (motionInstance._loop !== undefined) {
+            motionInstance._loop = true;
+        }
+    }
+    motionManager.stopAllMotions();
+    live2dModel.motion(groupName, motionIndex, 3);
+    return true;
+}
+
 // 全屏控制函数
 const requestFullscreen = () => {
     const elem = document.documentElement;
@@ -849,6 +883,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     // VRM/MMD 专属设置区域 DOM 引用
     const vrmSettingsSection = document.getElementById('vrm-settings-section');
     const mmdSettingsSection = document.getElementById('mmd-settings-section');
+    async function restoreLive2DIdleAnimation() {
+        try {
+            const lanlanName = await getLanlanName();
+            if (!lanlanName || !live2dModel) return;
+            const data = await RequestHelper.fetchJson('/api/characters/');
+            const charData = data['猫娘']?.[lanlanName];
+            const savedMotion = getLive2DIdleAnimationFromCharacter(charData);
+            if (!savedMotion || savedMotion === '_no_motion_') return;
+            const motionFiles = currentModelFiles?.motion_files || [];
+            if (!motionFiles.includes(savedMotion)) {
+                console.warn('[Live2D] Saved idle motion is not part of the current model:', savedMotion);
+                return;
+            }
+            motionSelect.value = savedMotion;
+            updateMotionSelectButtonText();
+            if (motionManager) motionManager.updateDropdown();
+            const restored = await playLive2DPreviewMotionLoop(live2dModel, motionFiles, savedMotion);
+            if (restored) {
+                isMotionPlaying = true;
+                updateMotionPlayButtonIcon();
+            }
+        } catch (error) {
+            console.warn('[Live2D] Failed to restore idle motion:', error);
+        }
+    }
     // VRM 鼠标跟踪已移至 popup-ui 统一控制，不在外观管理页单独配置
     // MMD 光照
     const mmdAmbientIntensitySlider = document.getElementById('mmd-ambient-intensity-slider');
@@ -1632,6 +1691,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (itemId != null && itemId !== '') {
                     modelData.item_id = itemId;
                     modelData.live2d_item_id = itemId;
+                }
+                if (motionSelect) {
+                    modelData.live2d_idle_animation = motionSelect.value === '_no_motion_' ? '' : (motionSelect.value || '');
                 }
             }
 
@@ -4773,6 +4835,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // 启用其他控件
             setControlsDisabled(false);
+            await restoreLive2DIdleAnimation();
             showStatus(t('live2d.modelLoadSuccess', `模型 ${modelName} 加载成功`, { model: modelName }));
 
         } catch (error) {
@@ -4782,10 +4845,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    playMotionBtn.addEventListener('click', () => {
+    playMotionBtn.addEventListener('click', async () => {
         // 检查是否加载了模型
         if (!live2dModel) {
             showStatus(t('live2d.pleaseLoadModel', '请先加载模型'), 2000);
+            return;
+        }
+
+        if (motionSelect.value === '_no_motion_') {
+            try {
+                live2dModel.internalModel?.motionManager?.stopAllMotions();
+                isMotionPlaying = false;
+                updateMotionPlayButtonIcon();
+                showStatus(t('live2d.motionStopped', '动作已停止'), 1000);
+            } catch (error) {
+                console.error('停止动作失败:', error);
+            }
             return;
         }
 
@@ -4852,7 +4927,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // 使在途的表情 await 回调失效，防止异步返回后设置恢复定时器打断动作
                     window._currentExpressionPreviewToken = null;
 
-                    live2dModel.motion('PreviewAll', motionIndex, 3);
+                    await playLive2DPreviewMotionLoop(live2dModel, currentModelFiles.motion_files, motionSelect.value);
                     isMotionPlaying = true;
                     // 确保图标仍然是播放图标
                     updateMotionPlayButtonIcon();
@@ -4908,6 +4983,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 当选择新动作时，重置播放状态
     motionSelect.addEventListener('change', async (e) => {
+        window._currentLive2DMotionToken = (window._currentLive2DMotionToken || 0) + 1;
+        const currentToken = window._currentLive2DMotionToken;
         const selectedValue = e.target.value;
 
         // 如果选择的是第一个选项（空值，即"增加动作"），触发文件选择器
@@ -4923,7 +5000,40 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        isMotionPlaying = false;
+        if (selectedValue === '_no_motion_') {
+            if (live2dModel?.internalModel?.motionManager) {
+                live2dModel.internalModel.motionManager.stopAllMotions();
+            }
+            isMotionPlaying = false;
+            window.hasUnsavedChanges = true;
+            updateMotionPlayButtonIcon();
+            updateMotionSelectButtonText();
+            playMotionBtn.disabled = false;
+            return;
+        }
+
+        const motionFiles = currentModelFiles?.motion_files || [];
+        const selectedModel = live2dModel;
+        if (selectedModel && motionFiles.includes(selectedValue)) {
+            try {
+                const played = await playLive2DPreviewMotionLoop(selectedModel, motionFiles, selectedValue);
+                if (
+                    played &&
+                    window._currentLive2DMotionToken === currentToken &&
+                    selectedModel === (window.live2dManager ? window.live2dManager.getCurrentModel() : live2dModel) &&
+                    motionSelect.value === selectedValue
+                ) {
+                    isMotionPlaying = true;
+                }
+            } catch (error) {
+                console.warn('[Live2D] Failed to preview selected motion:', error);
+                isMotionPlaying = false;
+            }
+        } else {
+            isMotionPlaying = false;
+        }
+
+        window.hasUnsavedChanges = true;
         // 确保图标仍然是播放图标
         updateMotionPlayButtonIcon();
         updateMotionSelectButtonText();
@@ -6455,6 +6565,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         select.innerHTML = `<option value="">${firstOptionText}</option>`;
+        if (type === 'motion') {
+            const noMotionOption = document.createElement('option');
+            noMotionOption.value = '_no_motion_';
+            noMotionOption.textContent = t('live2d.noMotion', '无待机动作');
+            select.appendChild(noMotionOption);
+        }
         options.forEach(opt => {
             const option = document.createElement('option');
             option.value = opt;

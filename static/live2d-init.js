@@ -472,6 +472,9 @@ async function initLive2DModel() {
 
         // 设置页面卸载时的自动清理（确保资源正确释放）
         window.live2dManager.setupUnloadCleanup();
+        if (typeof window.restoreLive2DIdleAnimationOnMainPage === 'function') {
+            await window.restoreLive2DIdleAnimationOnMainPage();
+        }
 
             console.log('✓ Live2D 管理器自动初始化完成');
         } else if (isModelManagerPage) {
@@ -504,4 +507,3 @@ if (window.pageConfigReady && typeof window.pageConfigReady.then === 'function')
         }, 1000);
     }
 }
-
