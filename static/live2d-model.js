@@ -218,6 +218,85 @@ Live2DManager.prototype._scheduleEyeBlinkDiagnosticsLog = function(reason = 'mod
     }, 800);
 };
 
+Live2DManager.prototype._stopEyeBlinkStartupWatchdog = function() {
+    if (this._eyeBlinkStartupWatchdogTimer) {
+        clearInterval(this._eyeBlinkStartupWatchdogTimer);
+        this._eyeBlinkStartupWatchdogTimer = null;
+    }
+};
+
+Live2DManager.prototype._startEyeBlinkStartupWatchdog = function(reason = 'model-ready') {
+    if (typeof console === 'undefined') return;
+
+    this._stopEyeBlinkStartupWatchdog();
+
+    const sampleIntervalMs = 200;
+    const durationMs = 15000;
+    const closedThreshold = 0.2;
+    const warnAfterMs = 1500;
+    const startedAt = Date.now();
+    const samples = [];
+    let closedStreakMs = 0;
+    let warned = false;
+
+    this._eyeBlinkStartupWatchdogTimer = setInterval(() => {
+        const elapsedMs = Date.now() - startedAt;
+        let diagnostics = null;
+
+        try {
+            diagnostics = this.getEyeBlinkDiagnostics();
+        } catch (error) {
+            console.warn('[Live2D EyeBlink][startup-watchdog] diagnostics failed:', error);
+            this._stopEyeBlinkStartupWatchdog();
+            return;
+        }
+
+        const liveValues = diagnostics && diagnostics.liveValues ? diagnostics.liveValues : {};
+        const values = (diagnostics.eyeBlinkIds || [])
+            .map(id => liveValues[id] && liveValues[id].value)
+            .filter(value => typeof value === 'number');
+
+        if (values.length > 0) {
+            const minValue = Math.min(...values);
+            samples.push(minValue);
+            closedStreakMs = minValue < closedThreshold
+                ? closedStreakMs + sampleIntervalMs
+                : 0;
+
+            if (!warned && closedStreakMs >= warnAfterMs) {
+                warned = true;
+                console.warn('[Live2D EyeBlink][startup-watchdog] eyes appear stuck closed after model startup', {
+                    reason,
+                    elapsedMs,
+                    closedStreakMs,
+                    closedThreshold,
+                    diagnostics
+                });
+            }
+        }
+
+        if (elapsedMs >= durationMs) {
+            this._stopEyeBlinkStartupWatchdog();
+            const minObserved = samples.length > 0 ? Math.min(...samples) : null;
+            const maxObserved = samples.length > 0 ? Math.max(...samples) : null;
+            const lowSamples = samples.filter(value => value < closedThreshold).length;
+            const hasSuspiciousLow = lowSamples > 0 || warned;
+            const log = hasSuspiciousLow ? console.warn : console.info;
+            log.call(console, '[Live2D EyeBlink][startup-watchdog] startup sample summary', {
+                reason,
+                modelName: diagnostics && diagnostics.modelName,
+                eyeBlinkIds: diagnostics && diagnostics.eyeBlinkIds,
+                sampleCount: samples.length,
+                minObserved,
+                maxObserved,
+                lowSampleCount: lowSamples,
+                closedThreshold,
+                warned
+            });
+        }
+    }, sampleIntervalMs);
+};
+
 // 加载模型
 Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
     if (!this.pixi_app) {
@@ -248,6 +327,7 @@ Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
         clearTimeout(this._eyeBlinkDiagnosticsTimer);
         this._eyeBlinkDiagnosticsTimer = null;
     }
+    this._stopEyeBlinkStartupWatchdog();
 
     try {
         // 移除当前模型
@@ -969,6 +1049,7 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
     this._isModelReadyForInteraction = true;
     this._modelLoadState = 'ready';
     this._scheduleEyeBlinkDiagnosticsLog('model-ready');
+    this._startEyeBlinkStartupWatchdog('model-ready');
 
     // 模型完全可见后播放 Idle 情绪（替代原来的独立 setTimeout）
     if (hasIdleInEmotionMapping || hasIdleInFileReferences) {
