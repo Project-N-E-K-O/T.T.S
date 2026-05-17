@@ -7,6 +7,13 @@
  * - 常驻表情管理（如设置和清除常驻表情）
  */
 
+Live2DManager.prototype._shouldSkipExpressionParameterId = function(paramId, includePersistentSkips = false) {
+    const lipSyncParams = Array.isArray(window.LIPSYNC_PARAMS) ? window.LIPSYNC_PARAMS : [];
+    return lipSyncParams.includes(paramId) ||
+        this._isEyeBlinkParamId(paramId) ||
+        (includePersistentSkips && !!this._shouldSkipPersistentParameterId?.(paramId));
+};
+
 // 记录模型的初始参数（用于expression重置，跳过位置参数）
 Live2DManager.prototype.recordInitialParameters = function() {
     if (!this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.coreModel) {
@@ -375,8 +382,7 @@ Live2DManager.prototype._installManualExpressionOverride = function(params, fade
             : 1 - Math.pow(-2 * fadeProgress + 2, 2) / 2;
 
         for (const param of self._manualExpressionParams) {
-            if (Array.isArray(window.LIPSYNC_PARAMS) && window.LIPSYNC_PARAMS.includes(param.Id)) continue;
-            if (self._isEyeBlinkParamId(param.Id)) continue;
+            if (self._shouldSkipExpressionParameterId(param.Id)) continue;
             try {
                 // 每帧读取当前值（含 motion/focus/breathing 的实时贡献）
                 const current = coreModel.getParameterValueById(param.Id);
@@ -1060,13 +1066,20 @@ Live2DManager.prototype.setupPersistentExpressions = async function() {
                 const resp = await fetch(url);
                 if (!resp.ok) continue;
                 const data = await resp.json();
-                const params = Array.isArray(data.Parameters) ? data.Parameters : [];
+                const allParams = Array.isArray(data.Parameters) ? data.Parameters : [];
+                const params = allParams.filter(p => p && !this._shouldSkipExpressionParameterId(p.Id, true));
                 const base = String(file).split('/').pop() || '';
                 const name = base.replace('.exp3.json', '');
                 // 只有包含参数的表达才加入播放队列
                 if (params.length > 0) {
                     this.persistentExpressionNames.push(name);
                     this.persistentExpressionParamsByName[name] = params;
+                    if (params.length !== allParams.length) {
+                        if (!this._persistentExpressionManualOnlyNames) {
+                            this._persistentExpressionManualOnlyNames = new Set();
+                        }
+                        this._persistentExpressionManualOnlyNames.add(name);
+                    }
                 }
             } catch (e) {
                 console.warn('加载常驻表情失败:', file, e);
@@ -1105,7 +1118,7 @@ Live2DManager.prototype.teardownPersistentExpressions = function() {
         if (this.currentModel.internalModel.coreModel && hasBackup) {
             const core = this.currentModel.internalModel.coreModel;
             for (const [paramId, originalValue] of Object.entries(this._persistentParamsBackup)) {
-                if (this._isEyeBlinkParamId(paramId)) continue;
+                if (this._shouldSkipExpressionParameterId(paramId, true)) continue;
                 try { 
                     core.setParameterValueById(paramId, originalValue); 
                     console.log(`[teardown] 恢复参数 ${paramId} = ${originalValue}`);
@@ -1122,6 +1135,7 @@ Live2DManager.prototype.teardownPersistentExpressions = function() {
     }
     this.persistentExpressionNames = [];
     this.persistentExpressionParamsByName = {};
+    this._persistentExpressionManualOnlyNames = new Set();
     this._persistentParamsBackup = {};
 };
 
@@ -1154,8 +1168,7 @@ Live2DManager.prototype.applyPersistentExpressionsNative = async function(skipBa
             console.log(`[applyPersistent] 处理表情 ${name}, 参数数量:`, params ? params.length : 0);
             if (Array.isArray(params)) {
                 for (const p of params) {
-                    if (window.LIPSYNC_PARAMS && window.LIPSYNC_PARAMS.includes(p.Id)) continue;
-                    if (this._isEyeBlinkParamId(p.Id)) continue;
+                    if (this._shouldSkipExpressionParameterId(p.Id, true)) continue;
                     // 如果还没有备份过这个参数，保存其当前值
                     if (this._persistentParamsBackup[p.Id] === undefined) {
                         try {
@@ -1176,15 +1189,15 @@ Live2DManager.prototype.applyPersistentExpressionsNative = async function(skipBa
     
     for (const name of this.persistentExpressionNames || []) {
         try {
-            const maybe = await this.currentModel.expression(name);
-            if (!maybe && this.persistentExpressionParamsByName && Array.isArray(this.persistentExpressionParamsByName[name])) {
+            const manualOnly = this._persistentExpressionManualOnlyNames && this._persistentExpressionManualOnlyNames.has(name);
+            const maybe = manualOnly ? false : await this.currentModel.expression(name);
+            if ((manualOnly || !maybe) && this.persistentExpressionParamsByName && Array.isArray(this.persistentExpressionParamsByName[name])) {
                 // 回退：手动设置参数（跳过口型参数以避免覆盖lipsync）
                 try {
                     const params = this.persistentExpressionParamsByName[name];
                     if (core) {
                         for (const p of params) {
-                            if (window.LIPSYNC_PARAMS && window.LIPSYNC_PARAMS.includes(p.Id)) continue;
-                            if (this._isEyeBlinkParamId(p.Id)) continue;
+                            if (this._shouldSkipExpressionParameterId(p.Id, true)) continue;
                             try { core.setParameterValueById(p.Id, p.Value); } catch (_) {}
                         }
                     }
@@ -1197,8 +1210,7 @@ Live2DManager.prototype.applyPersistentExpressionsNative = async function(skipBa
                     const params = this.persistentExpressionParamsByName[name];
                     if (core) {
                         for (const p of params) {
-                            if (window.LIPSYNC_PARAMS && window.LIPSYNC_PARAMS.includes(p.Id)) continue;
-                            if (this._isEyeBlinkParamId(p.Id)) continue;
+                            if (this._shouldSkipExpressionParameterId(p.Id, true)) continue;
                             try { core.setParameterValueById(p.Id, p.Value); } catch (_) {}
                         }
                     }

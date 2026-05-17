@@ -459,8 +459,13 @@ async function initLive2DModel() {
                 onResidentExpressionApplied: (model) => {
                     if (modelPreferences && modelPreferences.parameters && 
                         model && model.internalModel && model.internalModel.coreModel) {
-                        window.live2dManager.applyModelParameters(model, modelPreferences.parameters);
-                        console.log('[Live2D Init] 在常驻表情应用后已重新应用用户偏好参数');
+                        const parameters = typeof window.live2dManager._sanitizePersistedModelParameters === 'function'
+                            ? window.live2dManager._sanitizePersistedModelParameters(modelPreferences.parameters, '用户偏好')
+                            : modelPreferences.parameters;
+                        if (parameters && Object.keys(parameters).length > 0) {
+                            window.live2dManager.applyModelParameters(model, parameters);
+                            console.log('[Live2D Init] 在常驻表情应用后已重新应用用户偏好参数');
+                        }
                     }
                 }
             });

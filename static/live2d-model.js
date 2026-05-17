@@ -131,6 +131,392 @@ Live2DManager.prototype._collectEyeBlinkParams = function(params) {
     return result;
 };
 
+Live2DManager.prototype._stopFallbackEyeBlink = function() {
+    if (this._fallbackEyeBlinkEmitter && this._fallbackEyeBlinkListener) {
+        try {
+            this._fallbackEyeBlinkEmitter.off('beforeModelUpdate', this._fallbackEyeBlinkListener);
+        } catch (_) {}
+    }
+    if (this._fallbackEyeBlinkTicker && this.pixi_app && this.pixi_app.ticker) {
+        try {
+            this.pixi_app.ticker.remove(this._fallbackEyeBlinkTicker);
+        } catch (_) {}
+    }
+    this._fallbackEyeBlinkEmitter = null;
+    this._fallbackEyeBlinkListener = null;
+    this._fallbackEyeBlinkTicker = null;
+    this._fallbackEyeBlinkState = null;
+};
+
+Live2DManager.prototype._stopTailVisibilityMotion = function() {
+    if (this._tailVisibilityMotionTicker && this.pixi_app && this.pixi_app.ticker) {
+        try {
+            this.pixi_app.ticker.remove(this._tailVisibilityMotionTicker);
+        } catch (_) {}
+    }
+    this._tailVisibilityMotionTicker = null;
+    this._tailVisibilityMotion = null;
+};
+
+Live2DManager.prototype._getFallbackEyeBlinkValue = function(now = performance.now()) {
+    const state = this._fallbackEyeBlinkState || (this._fallbackEyeBlinkState = {
+        phase: 'idle',
+        phaseStart: now,
+        nextAt: now + 1800 + Math.random() * 3600,
+        closeMs: 70,
+        holdMs: 45,
+        openMs: 130
+    });
+
+    if (state.phase === 'idle') {
+        if (now < state.nextAt) return 1;
+        state.phase = 'closing';
+        state.phaseStart = now;
+    }
+
+    if (state.phase === 'closing') {
+        const t = Math.min(1, (now - state.phaseStart) / state.closeMs);
+        if (t >= 1) {
+            state.phase = 'hold';
+            state.phaseStart = now;
+            return 0;
+        }
+        return 1 - t;
+    }
+
+    if (state.phase === 'hold') {
+        if (now - state.phaseStart >= state.holdMs) {
+            state.phase = 'opening';
+            state.phaseStart = now;
+        } else {
+            return 0;
+        }
+    }
+
+    if (state.phase === 'opening') {
+        const t = Math.min(1, (now - state.phaseStart) / state.openMs);
+        if (t >= 1) {
+            state.phase = 'idle';
+            state.phaseStart = now;
+            state.nextAt = now + 1800 + Math.random() * 3600;
+            return 1;
+        }
+        return t;
+    }
+
+    return 1;
+};
+
+Live2DManager.prototype._setupFallbackEyeBlink = function(model, loadToken) {
+    this._stopFallbackEyeBlink();
+    if (!model || !model.internalModel || model.internalModel.eyeBlink) return false;
+
+    const coreModel = model.internalModel.coreModel;
+    const ids = this._getEyeBlinkParamIds(model);
+    if (!coreModel || ids.length === 0) return false;
+
+    const applyBlinkFrame = () => {
+        if (!this._isLoadTokenActive(loadToken) || this.currentModel !== model || !model.internalModel || model.destroyed) {
+            this._stopFallbackEyeBlink();
+            return;
+        }
+
+        const value = this._getFallbackEyeBlinkValue();
+        for (const id of ids) {
+            try {
+                coreModel.setParameterValueById(id, value);
+            } catch (_) {}
+        }
+    };
+
+    const listener = () => applyBlinkFrame();
+    const ticker = () => applyBlinkFrame();
+
+    this._fallbackEyeBlinkEmitter = model.internalModel;
+    this._fallbackEyeBlinkListener = listener;
+    this._fallbackEyeBlinkTicker = ticker;
+    model.internalModel.on('beforeModelUpdate', listener);
+    if (this.pixi_app && this.pixi_app.ticker) {
+        this.pixi_app.ticker.add(ticker);
+    }
+    console.info('[Live2D EyeBlink] 已启用 fallback 自动眨眼:', ids);
+    return true;
+};
+
+Live2DManager.prototype._loadModelParameterMetadata = async function(modelName = this.modelName) {
+    this._parameterMetadataById = {};
+    this._savedParameterSkipIds = new Set();
+
+    if (!modelName) return;
+
+    try {
+        const response = await fetch(`/api/live2d/model_parameters/${encodeURIComponent(modelName)}`);
+        const data = await response.json();
+        if (!data || !data.success || !Array.isArray(data.parameters)) return;
+
+        const groups = data.parameter_groups || {};
+        for (const param of data.parameters) {
+            if (!param || !param.id) continue;
+            const group = groups[param.groupId] || {};
+            const meta = {
+                id: String(param.id),
+                groupId: param.groupId || '',
+                name: param.name || param.id,
+                groupName: group.name || param.groupId || ''
+            };
+            this._parameterMetadataById[meta.id] = meta;
+
+            // Model-specific button/toggle params such as "tail close" should not
+            // be replayed every frame as persistent pose data.
+            if (meta.groupName === '按键参数') {
+                this._savedParameterSkipIds.add(meta.id);
+            }
+        }
+    } catch (error) {
+        console.warn('[Live2D Model] 加载模型参数元数据失败:', error);
+    }
+};
+
+Live2DManager.prototype._shouldSkipPersistentParameterId = function(paramId) {
+    if (!paramId || !this._savedParameterSkipIds) return false;
+    return this._savedParameterSkipIds.has(paramId);
+};
+
+Live2DManager.prototype._sanitizePersistedModelParameters = function(parameters, source = 'saved') {
+    if (!parameters || typeof parameters !== 'object') return {};
+
+    const sanitized = {};
+    const skipped = {};
+    const skipIds = this._savedParameterSkipIds || new Set();
+
+    for (const [paramId, value] of Object.entries(parameters)) {
+        if (skipIds.has(paramId)) {
+            skipped[paramId] = {
+                value,
+                name: this._parameterMetadataById?.[paramId]?.name || paramId,
+                groupName: this._parameterMetadataById?.[paramId]?.groupName || ''
+            };
+            continue;
+        }
+        sanitized[paramId] = value;
+    }
+
+    if (Object.keys(skipped).length > 0) {
+        console.warn(`[Live2D Model] 已忽略 ${source} 中的模型按键参数，避免光环/翅膀/尾巴等部件被持久隐藏:`, skipped);
+    }
+
+    return sanitized;
+};
+
+Live2DManager.prototype._findParameterIdByName = function(name) {
+    if (!name || !this._parameterMetadataById) return null;
+    for (const meta of Object.values(this._parameterMetadataById)) {
+        if (meta && meta.name === name && meta.id) return meta.id;
+    }
+    return null;
+};
+
+Live2DManager.prototype._findParameterIdByMetadata = function(predicate) {
+    if (typeof predicate !== 'function' || !this._parameterMetadataById) return null;
+    for (const meta of Object.values(this._parameterMetadataById)) {
+        if (meta && meta.id && predicate(meta)) return meta.id;
+    }
+    return null;
+};
+
+Live2DManager.prototype._getExistingParameterId = function(coreModel, ids) {
+    if (!coreModel || !Array.isArray(ids)) return null;
+    for (const id of ids) {
+        if (!id) continue;
+        try {
+            if (coreModel.getParameterIndex(id) >= 0) return id;
+        } catch (_) {}
+    }
+    return null;
+};
+
+Live2DManager.prototype._getParameterMetadataText = function(meta) {
+    if (!meta) return '';
+    return `${meta.id || ''} ${meta.name || ''} ${meta.groupId || ''} ${meta.groupName || ''}`.toLowerCase();
+};
+
+Live2DManager.prototype._isTailParameterMeta = function(meta) {
+    const text = this._getParameterMetadataText(meta);
+    return /tail|尾巴|尻尾|しっぽ|テール/.test(text);
+};
+
+Live2DManager.prototype._isTailCloseParameterMeta = function(meta) {
+    if (!this._isTailParameterMeta(meta)) return false;
+    const text = this._getParameterMetadataText(meta);
+    return /close|closed|hide|hidden|off|关闭|關閉|隠|隐藏|非表示/.test(text);
+};
+
+Live2DManager.prototype._isTailPhysicsXParameterMeta = function(meta) {
+    if (!this._isTailParameterMeta(meta)) return false;
+    const text = this._getParameterMetadataText(meta);
+    if (/close|closed|hide|hidden|关闭|關閉|隐藏|非表示/.test(text)) return false;
+    return /physics|物理|swing|揺|摇|ゆれ/.test(text) && /(^|[^a-z])x([^a-z]|$)|物理x/.test(text);
+};
+
+Live2DManager.prototype._findTailCloseParameterId = function(coreModel) {
+    const exactId = this._findParameterIdByName('尾巴关闭');
+    const buttonId = this._findParameterIdByMetadata(meta =>
+        meta.groupName === '按键参数' && this._isTailCloseParameterMeta(meta));
+    const fuzzyId = this._findParameterIdByMetadata(meta => this._isTailCloseParameterMeta(meta));
+    return this._getExistingParameterId(coreModel, [exactId, buttonId, fuzzyId, 'Paramtongue20']);
+};
+
+Live2DManager.prototype._findTailPhysicsXParameterId = function(coreModel) {
+    const exactId = this._findParameterIdByName('尾巴物理X');
+    const fuzzyId = this._findParameterIdByMetadata(meta => this._isTailPhysicsXParameterMeta(meta));
+    return this._getExistingParameterId(coreModel, [exactId, fuzzyId, 'Param28']);
+};
+
+Live2DManager.prototype._setupTailVisibilityMotion = function(model, loadToken) {
+    this._stopTailVisibilityMotion();
+    const coreModel = model && model.internalModel && model.internalModel.coreModel;
+    if (!coreModel || !this.pixi_app || !this.pixi_app.ticker) return null;
+
+    const tailCloseId = this._findTailCloseParameterId(coreModel);
+    const tailPhysicsXId = this._findTailPhysicsXParameterId(coreModel);
+    if (!tailPhysicsXId) return null;
+
+    if (tailCloseId) {
+        try {
+            const tailClose = coreModel.getParameterValueById(tailCloseId);
+            if (Number.isFinite(tailClose) && tailClose >= 0.5) return null;
+        } catch (_) {}
+    }
+
+    try {
+        const idx = coreModel.getParameterIndex(tailPhysicsXId);
+        if (idx < 0) return null;
+
+        const minValue = coreModel.getParameterMinimumValue(idx);
+        const maxValue = coreModel.getParameterMaximumValue(idx);
+        const min = Number.isFinite(minValue) ? minValue : -30;
+        const max = Number.isFinite(maxValue) ? maxValue : 30;
+        if (!(min < max)) return null;
+
+        const durationMs = 5200;
+        const startTime = performance.now();
+        const applyFrame = () => {
+            if (!this._isLoadTokenActive(loadToken) || this.currentModel !== model || !model.internalModel || model.destroyed) {
+                this._stopTailVisibilityMotion();
+                return;
+            }
+
+            try {
+                if (tailCloseId) {
+                    const tailClose = coreModel.getParameterValueById(tailCloseId);
+                    if (Number.isFinite(tailClose) && tailClose >= 0.5) return;
+                }
+            } catch (_) {
+                return;
+            }
+
+            const elapsed = (performance.now() - startTime) % durationMs;
+            const phase = elapsed / durationMs;
+            const eased = (1 - Math.cos(phase * Math.PI * 2)) / 2;
+            coreModel.setParameterValueByIndex(idx, min + (max - min) * eased);
+        };
+
+        this._tailVisibilityMotion = { id: tailPhysicsXId, closeId: tailCloseId, idx, min, max, durationMs };
+        this._tailVisibilityMotionTicker = applyFrame;
+        this.pixi_app.ticker.add(applyFrame);
+        applyFrame();
+        console.info('[Live2D Model] 已启用尾巴物理缓动，避免尾巴贴到身体后方:', this._tailVisibilityMotion);
+        return this._tailVisibilityMotion;
+    } catch (error) {
+        console.warn('[Live2D Model] 尾巴可见性校正失败:', error);
+        return null;
+    }
+};
+
+Live2DManager.prototype._adjustModelAwayFromChatPanel = function(model, options = {}) {
+    if (!model || typeof document === 'undefined') return null;
+    if (typeof isMobileWidth === 'function' && isMobileWidth()) return null;
+
+    const chat = document.getElementById('chat-container');
+    if (!chat || chat.classList.contains('minimized') || chat.classList.contains('mobile-collapsed')) return null;
+
+    const style = window.getComputedStyle ? window.getComputedStyle(chat) : null;
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)) {
+        return null;
+    }
+
+    const chatRect = chat.getBoundingClientRect();
+    if (chatRect.width <= 0 || chatRect.height <= 0) return null;
+
+    let bounds = model.getBounds();
+    const overlapsChat =
+        bounds.left < chatRect.right &&
+        bounds.right > chatRect.left &&
+        bounds.top < chatRect.bottom &&
+        bounds.bottom > chatRect.top;
+
+    if (!overlapsChat) return null;
+
+    const margin = Number.isFinite(options.margin) ? options.margin : 24;
+    const safeLeft = Math.min(chatRect.right + margin, window.innerWidth - margin);
+    const safeRight = window.innerWidth - margin;
+    const safeTop = margin;
+    const safeBottom = window.innerHeight - margin;
+    const safeWidth = safeRight - safeLeft;
+    const safeHeight = safeBottom - safeTop;
+
+    if (safeWidth <= 120 || safeHeight <= 120 || bounds.width <= 0 || bounds.height <= 0) {
+        return null;
+    }
+
+    let scaleFactor = Math.min(1, safeWidth / bounds.width, safeHeight / bounds.height);
+    if (scaleFactor < 1) {
+        const targetScaleX = Math.max(MODEL_PREFERENCES.SCALE_MIN, model.scale.x * scaleFactor);
+        const targetScaleY = Math.max(MODEL_PREFERENCES.SCALE_MIN, model.scale.y * scaleFactor);
+        if (targetScaleX < model.scale.x || targetScaleY < model.scale.y) {
+            model.scale.set(targetScaleX, targetScaleY);
+            bounds = model.getBounds();
+        }
+    }
+
+    let targetX = model.x;
+    let targetY = model.y;
+
+    if (bounds.left < safeLeft) targetX += safeLeft - bounds.left;
+    const shiftedRight = bounds.right + (targetX - model.x);
+    if (shiftedRight > safeRight) targetX -= shiftedRight - safeRight;
+
+    bounds = model.getBounds();
+    if (bounds.top < safeTop) targetY += safeTop - bounds.top;
+    if (bounds.bottom + (targetY - model.y) > safeBottom) targetY -= bounds.bottom + (targetY - model.y) - safeBottom;
+
+    const changed =
+        Math.abs(targetX - model.x) >= 1 ||
+        Math.abs(targetY - model.y) >= 1 ||
+        scaleFactor < 0.999;
+
+    if (!changed) return null;
+
+    const result = {
+        startX: model.x,
+        startY: model.y,
+        targetX,
+        targetY,
+        scale: { x: model.scale.x, y: model.scale.y },
+        chatRect: {
+            left: chatRect.left,
+            right: chatRect.right,
+            top: chatRect.top,
+            bottom: chatRect.bottom
+        }
+    };
+
+    model.x = targetX;
+    model.y = targetY;
+    console.info('[Live2D Model] 已调整模型位置，避免尾巴等部件被聊天框遮挡:', result);
+    return result;
+};
+
 Live2DManager.prototype.getEyeBlinkDiagnostics = function() {
     const model = this.currentModel;
     const coreModel = model && model.internalModel && model.internalModel.coreModel;
@@ -328,6 +714,8 @@ Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
         this._eyeBlinkDiagnosticsTimer = null;
     }
     this._stopEyeBlinkStartupWatchdog();
+    this._stopFallbackEyeBlink();
+    this._stopTailVisibilityMotion();
 
     try {
         // 移除当前模型
@@ -909,6 +1297,7 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
     // 设置常驻表情（同步后再安装快捷键，确保服务器配置生效）
     try { await this.syncEmotionMappingWithServer({ replacePersistentOnly: true }); } catch(_) {}
     this.installEmotionHotkeys();
+    await this._loadModelParameterMetadata(this.modelName);
     await this.setupPersistentExpressions();
     
     // 调用常驻表情应用完成的回调（事件驱动方式，替代不可靠的 setTimeout）
@@ -927,12 +1316,15 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
             const response = await fetch(`/api/live2d/load_model_parameters/${encodeURIComponent(this.modelName)}`);
             const data = await response.json();
             if (data.success && data.parameters && Object.keys(data.parameters).length > 0) {
+                const sanitizedParameters = this._sanitizePersistedModelParameters(data.parameters, 'parameters.json');
                 // 保存参数到实例变量，供定时器定期应用
-                this.savedModelParameters = data.parameters;
-                this._shouldApplySavedParams = true;
+                this.savedModelParameters = sanitizedParameters;
+                this._shouldApplySavedParams = Object.keys(sanitizedParameters).length > 0;
                 
                 // 立即应用一次
-                this.applyModelParameters(model, data.parameters);
+                if (this._shouldApplySavedParams) {
+                    this.applyModelParameters(model, sanitizedParameters);
+                }
             } else {
                 // 如果没有参数文件，清空保存的参数
                 this.savedModelParameters = null;
@@ -954,6 +1346,7 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
     } catch (e) {
         console.error('安装口型覆盖失败:', e);
     }
+    this._setupFallbackEyeBlink(model, loadToken);
     
     // 移除原本的 setInterval 定时器逻辑，改用 installMouthOverride 中的逐帧叠加逻辑
     if (this.savedModelParameters && this._shouldApplySavedParams) {
@@ -969,9 +1362,15 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
     // 此时所有异步操作（常驻表情、模型目录参数）都已完成，
     // 可以安全地应用用户偏好参数而不需要使用 setTimeout 延迟
     if (options.preferences && options.preferences.parameters && model.internalModel && model.internalModel.coreModel) {
-        this.applyModelParameters(model, options.preferences.parameters);
-        console.log('已应用用户偏好参数');
+        const sanitizedPreferenceParameters = this._sanitizePersistedModelParameters(options.preferences.parameters, '用户偏好');
+        if (Object.keys(sanitizedPreferenceParameters).length > 0) {
+            this.applyModelParameters(model, sanitizedPreferenceParameters);
+            console.log('已应用用户偏好参数');
+        } else {
+            console.log('用户偏好参数仅包含模型按键参数，已跳过应用');
+        }
     }
+    this._setupTailVisibilityMotion(model, loadToken);
 
     // 确保 PIXI ticker 正在运行（防止从VRM切换后卡住）
     // 无条件调用 start()，因为它是幂等的（如果已在运行则不会有影响）
@@ -1019,6 +1418,13 @@ Live2DManager.prototype._configureLoadedModel = async function(model, modelPath,
             }
         } catch (e) {
             console.warn('[Live2D Model] 初次加载边界校正失败:', e);
+        }
+    }
+    if (typeof this._adjustModelAwayFromChatPanel === 'function') {
+        try {
+            this._adjustModelAwayFromChatPanel(model);
+        } catch (e) {
+            console.warn('[Live2D Model] 聊天框遮挡校正失败:', e);
         }
     }
     // ★ CSS 合成器层级揭示（替代原 GL alpha 淡入）
@@ -1300,6 +1706,7 @@ Live2DManager.prototype.installMouthOverride = function() {
                             for (const p of params) {
                                 if (lipSyncParams.includes(p.Id)) continue;
                                 if (this._isEyeBlinkParamId(p.Id)) continue;
+                                if (this._shouldSkipPersistentParameterId?.(p.Id)) continue;
                                 try {
                                     coreModel.setParameterValueById(p.Id, p.Value);
                                 } catch (_) {}
@@ -1370,6 +1777,7 @@ Live2DManager.prototype.installMouthOverride = function() {
                         for (const p of params) {
                             if (lipSyncParams.includes(p.Id)) continue;
                             if (this._isEyeBlinkParamId(p.Id)) continue;
+                            if (this._shouldSkipPersistentParameterId?.(p.Id)) continue;
                             try {
                                 currentCoreModel.setParameterValueById(p.Id, p.Value);
                             } catch (_) {}
@@ -1662,6 +2070,7 @@ Live2DManager.prototype.getPersistentExpressionParamIds = function() {
                 for (const p of params) {
                     if (p && p.Id) {
                         if (this._isEyeBlinkParamId(p.Id)) continue;
+                        if (this._shouldSkipPersistentParameterId?.(p.Id)) continue;
                         paramIds.add(p.Id);
                     }
                 }

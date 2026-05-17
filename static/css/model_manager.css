@@ -72,11 +72,22 @@ body {
     height: 100%;
     margin: 0;
     padding: 0;
-    background: url('/static/icons/model_manager_background.png') center center / cover no-repeat fixed;
-    background-color: #eee;
+    background: #eee;
     color: #222;
     font-family: 'Comic Neue', 'Microsoft YaHei', '微软雅黑', 'SimHei', '黑体', sans-serif !important;
     overflow: hidden;
+    position: relative;
+    isolation: isolate;
+    z-index: 0;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: url('/static/icons/model_manager_background.png') center center / cover no-repeat;
 }
 
 #live2d-container {

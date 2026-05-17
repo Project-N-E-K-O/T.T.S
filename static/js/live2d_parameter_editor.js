@@ -747,6 +747,14 @@ async function loadParameterInfo(modelName) {
     }
 }
 
+function shouldSkipPersistentParameterSave(paramId) {
+    const info = parameterInfo.find(param => param && param.id === paramId);
+    if (!info) return false;
+
+    const groupName = parameterGroups[info.groupId]?.name || '';
+    return groupName === '按键参数';
+}
+
 // 加载模型
 async function loadModel(modelName) {
     if (!modelName) return;
@@ -1358,6 +1366,9 @@ if (saveBtn) {
                     if (window.live2dManager &&
                         typeof window.live2dManager._isEyeBlinkParamId === 'function' &&
                         window.live2dManager._isEyeBlinkParamId(resolvedParamId)) {
+                        continue;
+                    }
+                    if (shouldSkipPersistentParameterSave(resolvedParamId)) {
                         continue;
                     }
                     const value = coreModel.getParameterValueByIndex(i);
