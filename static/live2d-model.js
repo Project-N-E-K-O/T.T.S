@@ -158,6 +158,68 @@ Live2DManager.prototype._stopTailVisibilityMotion = function() {
     this._tailVisibilityMotion = null;
 };
 
+Live2DManager.prototype._resetRuntimeBreathState = function() {
+    this._isBreathDrivenByMotion = false;
+    this._runtimeBreathTime = 0;
+    this._runtimeBreathParamIds = null;
+};
+
+Live2DManager.prototype._resolveRuntimeBreathParams = function(coreModel) {
+    if (!coreModel) return [];
+    if (Array.isArray(this._runtimeBreathParamIds)) {
+        return this._runtimeBreathParamIds;
+    }
+
+    const candidates = ['ParamBreath', 'ParamBreath2', 'ParamBreath3'];
+    this._runtimeBreathParamIds = candidates.filter(id => {
+        try {
+            return coreModel.getParameterIndex(id) >= 0;
+        } catch (_) {
+            return false;
+        }
+    });
+    return this._runtimeBreathParamIds;
+};
+
+Live2DManager.prototype._updateRuntimeBreath = function(delta) {
+    const coreModel = this.currentModel?.internalModel?.coreModel;
+    if (!coreModel) return;
+
+    const breathParamIds = this._resolveRuntimeBreathParams(coreModel);
+    if (breathParamIds.length === 0) return;
+
+    const safeDelta = Math.min(Math.max(Number(delta) || 0, 0), 0.1);
+    this._runtimeBreathTime = (this._runtimeBreathTime || 0) + safeDelta;
+
+    const phase = this._runtimeBreathTime * Math.PI * 2 / 3.8;
+    const normalized = 0.5 + Math.sin(phase) * 0.5;
+
+    for (const id of breathParamIds) {
+        try {
+            const idx = coreModel.getParameterIndex(id);
+            if (idx < 0) continue;
+
+            let min = 0;
+            let max = 1;
+            if (typeof coreModel.getParameterMinimumValueByIndex === 'function') {
+                min = coreModel.getParameterMinimumValueByIndex(idx);
+            } else if (coreModel.parameters?.minimumValues) {
+                min = coreModel.parameters.minimumValues[idx];
+            }
+            if (typeof coreModel.getParameterMaximumValueByIndex === 'function') {
+                max = coreModel.getParameterMaximumValueByIndex(idx);
+            } else if (coreModel.parameters?.maximumValues) {
+                max = coreModel.parameters.maximumValues[idx];
+            }
+
+            if (!Number.isFinite(min)) min = 0;
+            if (!Number.isFinite(max) || max <= min) max = min + 1;
+
+            coreModel.setParameterValueByIndex(idx, min + (max - min) * normalized);
+        } catch (_) {}
+    }
+};
+
 Live2DManager.prototype._getFallbackEyeBlinkValue = function(now = performance.now()) {
     const state = this._fallbackEyeBlinkState || (this._fallbackEyeBlinkState = {
         phase: 'idle',
@@ -716,6 +778,7 @@ Live2DManager.prototype.loadModel = async function(modelPath, options = {}) {
     this._stopEyeBlinkStartupWatchdog();
     this._stopFallbackEyeBlink();
     this._stopTailVisibilityMotion();
+    this._resetRuntimeBreathState();
 
     try {
         // 移除当前模型
@@ -1587,6 +1650,13 @@ Live2DManager.prototype.installMouthOverride = function() {
                     } catch (_) {}
                 }
             }
+            const breathParams = this._resolveRuntimeBreathParams(coreModel);
+            for (const id of breathParams) {
+                try {
+                    const idx = coreModel.getParameterIndex(id);
+                    if (idx >= 0) preUpdateParams[id] = coreModel.getParameterValueByIndex(idx);
+                } catch (_) {}
+            }
             
             // 先调用原始的 motionManager.update（添加错误处理）
             if (origMotionManagerUpdate) {
@@ -1605,6 +1675,24 @@ Live2DManager.prototype.installMouthOverride = function() {
             // 再次检查 coreModel 是否仍然有效（调用原始方法后）
             if (!coreModel || !this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.coreModel) {
                 return; // 如果模型已销毁，直接返回
+            }
+            this._isBreathDrivenByMotion = false;
+            for (const id of breathParams) {
+                try {
+                    const idx = coreModel.getParameterIndex(id);
+                    if (idx >= 0) {
+                        const postVal = coreModel.getParameterValueByIndex(idx);
+                        const preVal = preUpdateParams[id];
+                        if (preVal !== undefined && Math.abs(postVal - preVal) > 0.001) {
+                            this._isBreathDrivenByMotion = true;
+                            break;
+                        }
+                    }
+                } catch (_) {}
+            }
+            if (!this._isBreathDrivenByMotion) {
+                const delta = (this.currentModel?.deltaTime || 16.66) / 1000;
+                this._updateRuntimeBreath(delta);
             }
             
             // 然后在动作更新后立即覆盖参数
